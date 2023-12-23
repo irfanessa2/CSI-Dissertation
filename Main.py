@@ -17,8 +17,10 @@ while True:
 
     # Break the loop when 'q' is pressed
     if cv2.waitKey(1) & 0xFF == ord('q'):
+
         break
 
-# Release the VideoCapture object and close windows
+# Release the VideoCapture object and close windowss
+    
 cap.release()
 cv2.destroyAllWindows()
