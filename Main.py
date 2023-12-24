@@ -1,26 +1,78 @@
 import cv2
+import threading
+import queue
 
-# Initialize the webcam (use 0: default camera)
-cap = cv2.VideoCapture(0)
+class CameraStream:
+    def __init__(self, src):
+        self.cap = cv2.VideoCapture(src)
+        self.q = queue.Queue()
+        self.stopped = False
 
-# Check if the webcam is opened correctly
-if not cap.isOpened():
-    raise IOError("Cannot open webcam")
+        if not self.cap.isOpened():
+            raise IOError(f"Cannot open camera stream: {src}")
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+        # Start the thread to read frames from the video stream
+        t = threading.Thread(target=self.update, args=())
+        t.daemon = True
+        t.start()
 
-    # Display the captured frame
-    cv2.imshow('Webcam Live', frame)
+    def update(self):
+        while True:
+            if self.stopped:
+                return
 
-    # Break the loop when 'q' is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+            ret, frame = self.cap.read()
+            if not ret:
+                self.stop()
+                return
 
-        break
+            if not self.q.empty():
+                try:
+                    self.q.get_nowait()  # discard previous (unprocessed) frame
+                except queue.Empty:
+                    pass
 
-# Release the VideoCapture object and close windowss
-    
-cap.release()
-cv2.destroyAllWindows()
+            self.q.put(frame)
+
+    def read(self):
+        return self.q.get()
+
+    def more(self):
+        return self.q.qsize() > 0
+
+    def stop(self):
+        self.stopped = True
+        self.cap.release()
+
+def main():
+    camera_url = 'rtsp://irfanessa:Locker123@192.168.1.156/stream1'
+    stream = CameraStream(camera_url)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+    try:
+        while True:
+            if stream.more():
+                frame = stream.read()
+
+                # Convert frame to grayscale for face detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+                # Detect faces in the frame
+                faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+
+                # Draw green squares around detected faces
+                for (x, y, w, h) in faces:
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+
+                # Display the captured frame
+                cv2.imshow('Tapo Camera Live', frame)
+
+                # Break the loop when 'q' is pressed
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+    finally:
+        stream.stop()
+        cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    main()
