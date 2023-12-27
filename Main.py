@@ -3,6 +3,7 @@ import threading
 import queue
 import time
 
+
 class CameraStream:
     def __init__(self, src):
         self.cap = cv2.VideoCapture(src)
@@ -45,15 +46,18 @@ class CameraStream:
         self.stopped = True
         self.cap.release()
 
+
 def main():
-    camera_url = 'rtsp://192.168.1.88:8554/c920'
-    #stream = CameraStream(camera_url)
-    cap = cv2.VideoCapture(camera_url)
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    #camera_url = "rtsp://192.168.1.88:8554/c920"
+    # stream = CameraStream(camera_url)
+    cap = cv2.VideoCapture(0)
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
 
     prev_frame_time, new_frame_time = 0, 0
 
-    INTERLEAVE = 5 
+    INTERLEAVE = 5
     frame_cnt = 0
     faces = None
     while cap.isOpened():
@@ -65,7 +69,7 @@ def main():
         new_frame_time = time.time()
 
         # FPS calculation
-        fps = 1/(new_frame_time - prev_frame_time)
+        fps = 1 / (new_frame_time - prev_frame_time)
         prev_frame_time = new_frame_time
         fps_text = "{:.2f}".format(fps)  # Format FPS to two decimal places
 
@@ -77,22 +81,24 @@ def main():
             # Detect faces in the frame
             faces = face_cascade.detectMultiScale(gray, 1.1, 4)
 
-        for (x, y, w, h) in faces:
-            cv2.rectangle(orig, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                
+        for x, y, w, h in faces:
+            cv2.rectangle(orig, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
         # Put FPS text on frame
-        cv2.putText(orig, fps_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-        print(f"{fps:.2f}", end='\r', flush=True)
+        cv2.putText(
+            orig, fps_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
+        )
+        print(f"{fps:.2f}", end="\r", flush=True)
 
         # Display the captured frame
-                
-        cv2.imshow('Tapo Camera Live', orig)
+
+        cv2.imshow("C920 Live", orig)
         frame_cnt -= 1
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -1,0 +1,3 @@
+[submodule "Eye-Tracker"]
+	path = Eye-Tracker
+	url = https://github.com/stepacool/Eye-Tracker.git
