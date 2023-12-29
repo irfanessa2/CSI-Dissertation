@@ -13,13 +13,8 @@ mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 mp_face_mesh = mp.solutions.face_mesh
 
-LEFT_EYE_INDICES = [33, 159, 133, 145, 153, 144]
-RIGHT_EYE_INDICES = [362, 386, 263, 373, 380, 390]
-
-
-
-
-
+LEFT_EYE_INDICES = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
+RIGHT_EYE_INDICES = [133, 153, 154, 155, 145, 144, 163, 7, 33, 246, 161, 160, 159, 158, 157, 173]
 
 
 def calculate_ear(eye):
@@ -44,9 +39,7 @@ class CameraStream(QThread):
         self.hands = mp_hands.Hands()
         self.face_mesh = mp_face_mesh.FaceMesh()
         self.blink_count = 0
-        self.ear_threshold = 0.21
-        self.consecutive_frames = 3
-        self.blink_counter = 0
+        self.ear_threshold = 0.4  #0.21 before
         self.frame_skip = 1  # Skip every 5 frames
         self.resize_factor = 1  # Reduce frame size by 50%
         self.predictions = {}
@@ -60,6 +53,8 @@ class CameraStream(QThread):
     def increment_blinks(self):
         self.blink_count+=1
         self.blink_signal.emit(self.blink_count)
+        print(self.blink_count)
+
     
     def process_frame(self, frame):
         frame = cv2.resize(frame, None, fx=self.resize_factor, fy=self.resize_factor)
@@ -107,18 +102,12 @@ class CameraStream(QThread):
                 ear = (left_ear + right_ear) / 2.0
                 self.ear_signal.emit(ear)
                 
-                if ear < self.ear_threshold and not self.blinked:
-                    self.blinked = True
-                    self.increment_blinks()
+                if ear < self.ear_threshold:
+                    if not self.blinked:
+                        self.blinked = True
+                        self.increment_blinks()
                 else:
-                    self.blinked = False
-                    
-                    
-                    # if self.blink_counter >= self.consecutive_frames:
-                    #     self.blink_count += 1
-                    #     self.blink_count_signal.emit(self.blink_count, ear)
-                    # self.blink_counter = 0
-
+                    self.blinked = False                 
         return frame
 
     def run(self):
@@ -154,6 +143,10 @@ class CameraStream(QThread):
     def stop(self):
         self.stopped = True
         self.wait()
+        
+        
+        
+        
 
 class TestingWindow(QWidget):
     update = pyqtSignal()
@@ -172,9 +165,9 @@ class TestingWindow(QWidget):
 
         self.stream = CameraStream(0, self)
         self.stream.change_pixmap_signal.connect(self.update_image)
-        # self.stream.blink_count_signal.connect(self.update_blink_count)
+        #self.stream.blink_count_signal.connect(self.update_blink_count)
         self.stream.ear_signal.connect(self.update_ear)
-        self.stream.blink_count_signal.connect(self.update_blink_count)
+        self.stream.blink_signal.connect(self.update_blink_count)
         self.update.connect(self.update_values)
         self.stream.start()
 
@@ -188,8 +181,9 @@ class TestingWindow(QWidget):
 
     @pyqtSlot(int)
     def update_blink_count(self, count):
-        self.blink = count
+        self.blinks = count
         self.update.emit()
+    
     
     @pyqtSlot(float)
     def update_ear(self, val):
