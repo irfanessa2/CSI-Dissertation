@@ -16,9 +16,6 @@ class MainWindow(QMainWindow):
         self.centralWidget.setLayout(self.layout)
 
 
-        self.exit_button = exit_button()
-        self.layout.addWidget(self.exit_button)
-
         # Add the Testing_Button widget to the layout
         self.testing_button = Testing_Button()
         self.layout.addWidget(self.testing_button)
@@ -26,6 +23,9 @@ class MainWindow(QMainWindow):
         # Connect the Testing_Button's signal to open the testing window
         self.testing_button.button.clicked.connect(self.open_testing_window)
 
+        self.exit_button = exit_button()
+        self.layout.addWidget(self.exit_button)
+        
     def open_testing_window(self):
         # Open the testing window when the button is clicked
         self.testing_window = TestingWindow()

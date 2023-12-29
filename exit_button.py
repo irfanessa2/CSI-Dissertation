@@ -8,7 +8,7 @@ class exit_button(QWidget):
         main_layout = QVBoxLayout(self)
 
         # Add stretch to center vertically
-        main_layout.addStretch(30)
+        main_layout.addStretch(-30)
 
         # Horizontal layout for the button
         button_layout = QHBoxLayout()
@@ -22,7 +22,7 @@ class exit_button(QWidget):
         main_layout.addLayout(button_layout)  # Add horizontal layout to the main layout
 
         # Add more stretch below the button to move it up
-        main_layout.addStretch()
+        main_layout.addStretch(60)
 
         #exit
         self.button.clicked.connect(QApplication.instance().quit)

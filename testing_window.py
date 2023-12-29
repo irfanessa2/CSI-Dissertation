@@ -143,10 +143,6 @@ class CameraStream(QThread):
     def stop(self):
         self.stopped = True
         self.wait()
-        
-        
-        
-        
 
 class TestingWindow(QWidget):
     update = pyqtSignal()

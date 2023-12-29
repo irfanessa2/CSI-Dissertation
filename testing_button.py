@@ -8,7 +8,7 @@ class Testing_Button(QWidget):
         main_layout = QVBoxLayout(self)
 
         # Add stretch to center vertically
-        main_layout.addStretch()
+        main_layout.addStretch(20)
 
         # Horizontal layout for the button
         button_layout = QHBoxLayout()
@@ -22,4 +22,4 @@ class Testing_Button(QWidget):
         main_layout.addLayout(button_layout)  # Add horizontal layout to the main layout
 
         # Add stretch to center vertically
-        main_layout.addStretch(15)
+        main_layout.addStretch(0)
