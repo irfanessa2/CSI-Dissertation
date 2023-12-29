@@ -1,3 +1,5 @@
 opencv-python
 pyqt5
 numpy
+mediapipe
+roboflow
