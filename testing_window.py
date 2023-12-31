@@ -58,6 +58,41 @@ RIGHT_EYE_INDICES = [
 ]
 
 
+UPPER_LIP_INDICES = [
+    61, 
+    185, 
+    40, 
+    39, 
+    37, 
+    0, 
+    267, 
+    269, 
+    270, 
+    409, 
+    291]
+                                                                                # CHANGES
+
+LOWER_LIP_INDICES = [
+    146,
+    91,
+    181,
+    84,
+    17,
+    314,
+    405,
+    321,
+    375,
+    291,
+    308,
+    415,
+    310,
+    311,
+    312,
+    13,
+    82,
+]
+
+
 class CameraStream(QThread):
     change_pixmap_signal = pyqtSignal(QImage)
     ear_signal = pyqtSignal(float)
@@ -71,19 +106,22 @@ class CameraStream(QThread):
         self.stopped = False
         self.hands = mp_hands.Hands()
         self.face_mesh = mp_face_mesh.FaceMesh()
-        self.ear_threshold = 0.30  # 0.21 before
+        self.ear_threshold = 0.40  # 0.21 before
         self.predictions = {}
         self.blinked = False
         self.opened = False
         self.face_detection_thread = Thread()
         self.hand_detection_thread = Thread()
         self.blink_detection_thread = Thread()
+        self.yawn_detection_thread = Thread()  # CHANGES
         self.face_results = None
         self.hand_results = None
         self.blink_results = None
+        self.yawn_results = None    #CHANGES
         self.do_face = False
         self.do_hands = False
         self.do_blink = False
+        self.do.yawn = False    #CHANGES
 
     @pyqtSlot(bool)
     def set_do_hands(self, val):
@@ -96,12 +134,21 @@ class CameraStream(QThread):
         self.do_face = val
         if not val and self.face_detection_thread.is_alive():
             self.face_detection_thread.join()  # blocking in MainThread, ensure the thread is very short
+    
+    
+    @pyqtSlot(bool)
+    def set_do_yawn(self, val):
+        self.do_yawn = val
+        if not val and self.yawn_detection_thread.is_alive():                                                   #CHANGES
+            self.yawn_detection_thread.join()  # blocking in MainThread, ensure the thread is very short        
+
 
     @pyqtSlot(bool)
     def set_do_blink(self, val):
         self.do_blink = val
         if not val and self.blink_detection_thread.is_alive():
             self.blink_detection_thread.join()  # blocking in MainThread, ensure the thread is very short
+
 
     def face_detection_worker(self, frame):
         # Face detection
@@ -164,9 +211,9 @@ class CameraStream(QThread):
                         self.opened = False
                         self.eyes_closed_signal.emit()
                 elif not self.opened:
-                        self.opened = True
-                        self.blinked = False
-                        self.eyes_open_signal.emit()
+                    self.opened = True
+                    self.blinked = False
+                    self.eyes_open_signal.emit()
         return frame
 
     def run(self):
@@ -240,6 +287,7 @@ class TestingWindow(QWidget):
     do_face = pyqtSignal(bool)
     do_hands = pyqtSignal(bool)
     do_blink = pyqtSignal(bool)
+    do_yawn = pyqtSignal(bool)  # CHANGES
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -247,6 +295,7 @@ class TestingWindow(QWidget):
         self.resize(900, 480)
         self.blinks = 0
         self.ear = 0.0
+        self.yawns = 0  # CHANGES
         self._last_frame_ts = 0
         self.fps = deque(maxlen=10)
         self.latency = deque(maxlen=10)
@@ -258,11 +307,12 @@ class TestingWindow(QWidget):
         self.eyes_opened_timer.setInterval(1)
         self.image_label = QLabel(self)
         self.blink_count_label = QLabel(self)
+        self.yawn_count_label = QLabel(self)  # CHANGES
         self.stream = CameraStream(0, self)
-        self.fps_label = QLabel('FPS: 0',self)
-        self.latency_label = QLabel('Latency: 0',self)
-        self.asleep_label = QLabel('ASLEEP',self)
-        self.asleep_label.setStyleSheet('color:red')
+        self.fps_label = QLabel("FPS: 0", self)
+        self.latency_label = QLabel("Latency: 0", self)
+        self.asleep_label = QLabel("ASLEEP", self)
+        self.asleep_label.setStyleSheet("color:red")
         self.asleep_label.hide()
 
         main_layout = QHBoxLayout()
@@ -272,9 +322,12 @@ class TestingWindow(QWidget):
         self.face_toggle = QRadioButton("Face Detection", self, autoExclusive=False)
         self.hands_toggle = QRadioButton("Hands Detection", self, autoExclusive=False)
         self.blink_toggle = QRadioButton("Blink Detection", self, autoExclusive=False)
-        
+        self.yawn_toggle = QRadioButton(
+            "Yawn Detection", self, autoExclusive=False
+        )  # CHANGES
+
         self.sleep_bar = QProgressBar(self)
-        self.sleep_bar.setMaximum(3*1000)
+        self.sleep_bar.setMaximum(3 * 1000)
         self.sleep_bar.setValue(0)
 
         frame_stats_layout.addWidget(self.fps_label)
@@ -283,6 +336,7 @@ class TestingWindow(QWidget):
         stats_layout.addWidget(self.face_toggle)
         stats_layout.addWidget(self.hands_toggle)
         stats_layout.addWidget(self.blink_toggle)
+        stats_layout.addWidget(self.yawn_toggle)  # CHANGES
         stats_layout.addWidget(QWidget())
         stats_layout.addWidget(self.sleep_bar)
         stats_layout.addWidget(self.asleep_label)
@@ -305,10 +359,16 @@ class TestingWindow(QWidget):
             lambda: self.do_blink.emit(self.blink_toggle.isChecked())
         )
 
+        self.yawn_toggle.toggled.connect(
+            lambda: self.do_yawn.emit(self.blink_toggle.isChecked())  # CHANGES
+        )
+
         self.do_face.connect(self.stream.set_do_face)
         self.do_hands.connect(self.stream.set_do_hands)
         self.do_blink.connect(self.stream.set_do_blink)
-        
+        self.do_yawn.connect(self.stream.set_do_yawn)   #CHANGES
+
+
         self.stream.latency.connect(self.latency_update)
         self.stream.change_pixmap_signal.connect(self.update_image)
         self.stream.ear_signal.connect(self.update_ear)
@@ -318,7 +378,7 @@ class TestingWindow(QWidget):
         self.update.connect(self.update_values)
         self.stream.start()
         self.update_values()
-        
+
     def start_closed_eyes_timer(self):
         self.stop_all_timers()
         self.eyes_closed_timer.start()
@@ -326,13 +386,13 @@ class TestingWindow(QWidget):
     def start_open_eyes_timer(self):
         self.stop_all_timers()
         self.eyes_opened_timer.start()
-        
+
     def stop_all_timers(self):
         if self.eyes_closed_timer.isActive():
             self.eyes_closed_timer.stop()
         if self.eyes_opened_timer.isActive():
             self.eyes_opened_timer.stop()
-        
+
     def sleep_bar_inc_method(self):
         if self.eyes_opened_timer.isActive():
             self.eyes_opened_timer.stop()
@@ -340,7 +400,7 @@ class TestingWindow(QWidget):
             self.asleep_label.show()
             return
         self.sleep_bar.setValue(self.sleep_bar.value() + 1)
-    
+
     def sleep_bar_dec_method(self):
         self.asleep_label.hide()
         if self.eyes_closed_timer.isActive():
@@ -349,7 +409,6 @@ class TestingWindow(QWidget):
             return
         self.sleep_bar.setValue(self.sleep_bar.value() - 1)
 
-        
     @pyqtSlot(object)
     def latency_update(self, ts):
         self.frame_ts = ts
@@ -357,7 +416,7 @@ class TestingWindow(QWidget):
     @pyqtSlot(QImage)
     def update_image(self, image):
         frame_ts = time.time_ns()
-        self.fps.append(frame_ts-self._last_frame_ts)
+        self.fps.append(frame_ts - self._last_frame_ts)
         self._last_frame_ts = frame_ts
         self.latency.append(time.time_ns() - self.frame_ts)
         self.latency_label.setText(f"Latency: {np.mean(self.latency)/1e6:.2f}ms")
@@ -371,6 +430,11 @@ class TestingWindow(QWidget):
     @pyqtSlot()
     def update_blink_count(self):
         self.blinks += 1
+        self.update.emit()
+
+    @pyqtSlot()
+    def update_yawn_count(self):
+        self.yawn += 1  # CHANGES
         self.update.emit()
 
     @pyqtSlot(float)
