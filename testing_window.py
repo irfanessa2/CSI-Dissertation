@@ -121,7 +121,7 @@ class CameraStream(QThread):
         self.do_face = False
         self.do_hands = False
         self.do_blink = False
-        self.do.yawn = False    #CHANGES
+        self.do_yawn = False    #CHANGES
 
     @pyqtSlot(bool)
     def set_do_hands(self, val):
