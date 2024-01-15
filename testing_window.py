@@ -13,6 +13,8 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QProgressBar,
 )
+import pyqtgraph as pg
+from datetime import datetime, timedelta
 import numpy as np
 from threading import Thread
 
@@ -97,7 +99,6 @@ class CameraStream(QThread):
         self.hands = mp_hands.Hands()
         self.face_mesh = mp_face_mesh.FaceMesh()
         self.ear_threshold = 0.40  # 0.21 before
-        self.predictions = {}
         self.blinked = False
         self.opened = False
         self.face_feature_detection_thread = Thread()
@@ -265,7 +266,7 @@ class CameraStream(QThread):
     @staticmethod
     def get_feature_landmarks(landmarks, indices):
         return [np.array([landmarks[i].x, landmarks[i].y]) for i in indices]
-    
+
     @staticmethod
     def convert_to_qimage(frame):
         h, w, ch = frame.shape
@@ -287,6 +288,7 @@ class TestingWindow(QWidget):
         self.setWindowTitle("Testing Window")
         self.resize(900, 480)
         self.blinks = 0
+        self.start_time = datetime.now()  # Initialize the start time
         self.ear = 0.0
         self.yawns = 0
         self._last_frame_ts = 0
@@ -298,11 +300,31 @@ class TestingWindow(QWidget):
         self.eyes_opened_timer = QTimer(self)
         self.eyes_opened_timer.timeout.connect(self.sleep_bar_dec_method)
         self.eyes_opened_timer.setInterval(1)
+
+        self.time_data = deque(
+            maxlen=300
+        )  # Store up to the last 300 data points for time
+        self.bpm_data = deque(
+            maxlen=300
+        )  # Store up to the last 300 data points for BPM
+        self.ypm_data = deque(
+            maxlen=300
+        )  # Store up to the last 300 data points for YPM
+
+        # Initialize plot widget
+        self.bpm_plot_widget = pg.PlotWidget(self)
+        self.bpm_curve = self.bpm_plot_widget.plot(pen="y")
+        self.ypm_plot_widget = pg.PlotWidget(self)
+        self.ypm_curve = self.ypm_plot_widget.plot(pen="r")
+
         self.image_label = QLabel(self)
         self.blink_count_label = QLabel(self)
         self.yawn_count_label = QLabel(self)
-        self.stream = CameraStream(0, self)
+        self.stream = CameraStream(0, self)  # Replace with your actual CameraStream
         self.fps_label = QLabel("FPS: 0", self)
+        self.bpm_label = QLabel("BPM: 0", self)  # Use for displaying text BPM
+        self.ypm_label = QLabel("YPM: 0", self)  # Use for displaying text YPM
+
         self.mar = QLabel("Mouth AR:", self)
         self.yawn_type = QLabel(self)
         self.latency_label = QLabel("Latency: 0", self)
@@ -320,6 +342,8 @@ class TestingWindow(QWidget):
         self.blink_toggle = QRadioButton("Blink Detection", self, autoExclusive=False)
         self.yawn_toggle = QRadioButton("Yawn Detection", self, autoExclusive=False)
 
+        self.is_yawning = False
+
         self.sleep_bar = QProgressBar(self)
         self.sleep_bar.setMaximum(3 * 1000)
         self.sleep_bar.setValue(0)
@@ -329,18 +353,23 @@ class TestingWindow(QWidget):
 
         frame_stats_layout.addWidget(self.fps_label)
         frame_stats_layout.addWidget(self.latency_label)
+        frame_stats_layout.addWidget(self.bpm_label)
+        frame_stats_layout.addWidget(self.ypm_label)
 
         stats_layout.addWidget(self.face_toggle)
         stats_layout.addWidget(self.hands_toggle)
         stats_layout.addWidget(self.blink_toggle)
         stats_layout.addWidget(self.yawn_toggle)
-        stats_layout.addWidget(QWidget())
+        stats_layout.addWidget(QWidget())  # Placeholder widget
         stats_layout.addWidget(self.sleep_bar)
         stats_layout.addWidget(self.asleep_label)
         stats_layout.addWidget(self.blink_count_label)
         stats_layout.addLayout(yawn_stats_layout)
         stats_layout.addLayout(frame_stats_layout)
-        stats_layout.setAlignment(Qt.AlignTop)
+        stats_layout.addWidget(
+            self.bpm_plot_widget
+        )  # Add the plot widget to the stats layout
+        stats_layout.addWidget(self.ypm_plot_widget)
 
         main_layout.addWidget(self.image_label)
         main_layout.addLayout(stats_layout)
@@ -365,7 +394,7 @@ class TestingWindow(QWidget):
         self.do_hands.connect(self.stream.set_do_hands)
         self.do_blink.connect(self.stream.set_do_blink)
         self.do_yawn.connect(self.stream.set_do_yawn)
-
+        
         self.stream.latency_signal.connect(self.latency_update)
         self.stream.change_pixmap_signal.connect(self.update_image)
         self.stream.ear_signal.connect(self.update_ear)
@@ -380,12 +409,17 @@ class TestingWindow(QWidget):
     @pyqtSlot(float)
     def update_mar(self, val):
         self.mar.setText(f"Mouth AR: {val:.2f}")
-        if val > 1.:
-            yawn_type = 'YAWNING'
-        elif val < .6:
-            yawn_type = 'CLOSED'
+        if val > 1.0:
+            yawn_type = "YAWNING"
+            if not self.is_yawning:  # Check if transition to yawning state
+                self.is_yawning = True
+                self.update_yawn_count()
+        elif val < 0.6:
+            yawn_type = "CLOSED"
+            self.is_yawning = False  # Reset yawn state when mouth is closed
         else:
-            yawn_type = 'TALKING'
+            yawn_type = "TALKING"
+            self.is_yawning = False  # Reset yawn state when talking
         self.yawn_type.setText(yawn_type)
 
     def start_closed_eyes_timer(self):
@@ -430,6 +464,8 @@ class TestingWindow(QWidget):
         self.latency.append(time.time_ns() - self.frame_ts)
         self.latency_label.setText(f"Latency: {np.mean(self.latency)/1e6:.2f}ms")
         self.fps_label.setText(f"FPS: {1e9/np.mean(self.fps):.2f}")
+        self.update_bpm_label()
+        self.update_ypm_label()
         self.image_label.setPixmap(QPixmap.fromImage(image))
 
     @pyqtSlot()
@@ -438,12 +474,52 @@ class TestingWindow(QWidget):
 
     @pyqtSlot()
     def update_blink_count(self):
-        self.blinks += 1
-        self.update.emit()
+        self.blinks += 1  # Increment the blink count
+        self.update.emit()  # Emit signal to update GUI (if needed)
+
+    def calculate_average_bpm(self):
+        elapsed_time_minutes = (
+            datetime.now() - self.start_time
+        ).total_seconds() / 60  # Convert elapsed time to minutes
+        if elapsed_time_minutes > 0:
+            return self.blinks / elapsed_time_minutes  # Calculate average BPM
+        else:
+            return 0
+
+    def update_bpm_label(self):
+        # Call this method at a regular interval to update the plot
+        average_bpm = self.calculate_average_bpm()
+        current_time = (
+            datetime.now() - self.start_time
+        ).total_seconds() / 60  # Current time in minutes
+        self.time_data.append(current_time)
+        self.bpm_data.append(average_bpm)
+        self.bpm_curve.setData(
+            list(self.time_data), list(self.bpm_data)
+        )  # Update the plot data
+        self.bpm_label.setText(f"BPM: {average_bpm:.2f}")
+
+    def calculate_average_ypm(self):
+        elapsed_time_minutes = (
+            datetime.now() - self.start_time
+        ).total_seconds() / 60  # Convert elapsed time to minutes
+        if elapsed_time_minutes > 0:
+            return self.yawns / elapsed_time_minutes  # Calculate average YPM
+        else:
+            return 0
+
+    def update_ypm_label(self):
+        average_ypm = self.calculate_average_ypm()
+        self.ypm_label.setText(f"YPM: {average_ypm:.2f}")
+        # Make sure this part is reached and values are correct
+        current_time = (datetime.now() - self.start_time).total_seconds() / 60
+        self.ypm_data.append(average_ypm)
+        self.ypm_curve.setData(list(self.time_data), list(self.ypm_data))
 
     @pyqtSlot()
     def update_yawn_count(self):
-        self.yawn += 1
+        print(self.yawns)
+        self.yawns += 1
         self.update.emit()
 
     @pyqtSlot(float)

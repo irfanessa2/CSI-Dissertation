@@ -4,3 +4,4 @@ numpy
 mediapipe
 roboflow
 matplotlib
+pyqtgraph
