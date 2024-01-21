@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 import numpy as np
 from threading import Thread
 
+printed = False
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 mp_face_mesh = mp.solutions.face_mesh
@@ -243,7 +244,22 @@ class CameraStream(QThread):
         self.wait()
 
     @staticmethod
+    def calculate_area(points):
+        points = np.array(points)
+        x = points[:,0]
+        y = points[:,1]
+        
+        s1 = np.sum(x*np.roll(y,-1))
+        s2 = np.sum(y*np.roll(x,-1))
+        
+        return np.absolute(s1-s2)/2
+        
+    @staticmethod
     def calculate_ar(eye):
+        global printed
+        if not printed:
+            printed = True
+            #print(eye)
         min_x, min_y = np.min(eye, axis=0)
         max_x, max_y = np.max(eye, axis=0)
         return (max_y - min_y) / (max_x - min_x)
@@ -273,6 +289,14 @@ class TestingWindow(QWidget):
         self.setWindowTitle("Testing Window")
         self.resize(900, 480)
         self.blinks = 0
+        
+        self.eye_fatigue_threshold = None
+        self.blink_threshold_line = None
+        
+        self.yawn_fatigue_threshold = None
+        self.yawn_threshold_line = None
+
+
         self.start_time = datetime.now()  # Initialize the start time
         self.ear = 0.0
         self.yawns = 0
@@ -292,6 +316,10 @@ class TestingWindow(QWidget):
         self.bpm_data = deque(
             maxlen=300
         )  # Store up to the last 300 data points for BPM
+        
+        self.time_data2 = deque(
+            maxlen=300
+        )  # Store up to the last 300 data points for time
         self.ypm_data = deque(
             maxlen=300
         )  # Store up to the last 300 data points for YPM
@@ -317,6 +345,12 @@ class TestingWindow(QWidget):
         self.asleep_label.setStyleSheet("color:red")
         self.asleep_label.hide()
 
+
+
+        self.eye_fatigue_threshold_label = QLabel("Eye Fatigue Threshold: Calculating...", self)
+        self.yawn_fatigue_threshold_label = QLabel("Yawn Threshold: Calculating...", self)
+
+        
         main_layout = QHBoxLayout()
         stats_layout = QVBoxLayout()
         frame_stats_layout = QHBoxLayout()
@@ -340,6 +374,10 @@ class TestingWindow(QWidget):
         frame_stats_layout.addWidget(self.latency_label)
         frame_stats_layout.addWidget(self.bpm_label)
         frame_stats_layout.addWidget(self.ypm_label)
+        
+        stats_layout.addWidget(self.eye_fatigue_threshold_label)
+        stats_layout.addWidget(self.yawn_fatigue_threshold_label)
+
 
         stats_layout.addWidget(self.face_toggle)
         stats_layout.addWidget(self.hands_toggle)
@@ -394,7 +432,7 @@ class TestingWindow(QWidget):
     @pyqtSlot(float)
     def update_mar(self, val):
         self.mar.setText(f"Mouth AR: {val:.2f}")
-        if val > 1.0:
+        if val > 0.8:
             yawn_type = "YAWNING"
             if not self.is_yawning:  # Check if transition to yawning state
                 self.is_yawning = True
@@ -459,8 +497,10 @@ class TestingWindow(QWidget):
 
     @pyqtSlot()
     def update_blink_count(self):
-        self.blinks += 1  # Increment the blink count
-        self.update.emit()  # Emit signal to update GUI (if needed)
+        self.blinks += 1
+        if self.eye_fatigue_threshold is None:  
+            self.calculate_eye_fatigue_threshold()
+        self.update.emit()
 
     def calculate_average_bpm(self):
         elapsed_time_minutes = (
@@ -470,7 +510,8 @@ class TestingWindow(QWidget):
             return self.blinks / elapsed_time_minutes  # Calculate average BPM
         else:
             return 0
-
+        
+        
     def update_bpm_label(self):
         # Call this method at a regular interval to update the plot
         average_bpm = self.calculate_average_bpm()
@@ -482,7 +523,43 @@ class TestingWindow(QWidget):
         self.bpm_curve.setData(
             list(self.time_data), list(self.bpm_data)
         )  # Update the plot data
-        self.bpm_label.setText(f"BPM: {average_bpm:.2f}")
+        self.bpm_label.setText(f"BPM: {average_bpm:.2f}")   
+        
+        self.update_blink_threshold_label(average_bpm)
+        
+             
+
+    def calculate_eye_fatigue_threshold(self):
+        if self.eye_fatigue_threshold is None:
+            elapsed_time = datetime.now() - self.start_time
+            if elapsed_time.total_seconds() >= 10:  # Assuming 10 seconds for example
+                self.eye_fatigue_threshold = self.calculate_average_bpm() * 1.5
+                self.add_blink_threshold_line()
+
+
+    def add_blink_threshold_line(self):
+        # Add the threshold line only if it hasn't been added yet
+        if self.blink_threshold_line is None:
+            self.blink_threshold_line = pg.InfiniteLine(
+                angle=0,  # Horizontal line
+                pos=self.eye_fatigue_threshold,  # Position at the eye fatigue threshold value
+                pen=pg.mkPen('w', width=2)  # White line
+            )
+            self.bpm_plot_widget.addItem(self.blink_threshold_line)
+            print(self.eye_fatigue_threshold)
+            self.eye_fatigue_threshold_label.setText(f"Eye Fatigue Threshold: {self.eye_fatigue_threshold:.2f} BPM")
+
+
+    def update_blink_threshold_label(self, average_bpm):
+        if self.eye_fatigue_threshold is not None:
+
+            if average_bpm > self.eye_fatigue_threshold:
+                self.eye_fatigue_threshold_label.setText("Eye Fatigue")
+                self.eye_fatigue_threshold_label.setStyleSheet("color: red")
+            else:
+                self.eye_fatigue_threshold_label.setText(f"Blink Threshold ={self.eye_fatigue_threshold: .2f} BPM: OK")
+                self.eye_fatigue_threshold_label.setStyleSheet("color: green")
+
 
     def calculate_average_ypm(self):
         elapsed_time_minutes = (
@@ -494,19 +571,63 @@ class TestingWindow(QWidget):
             return 0
 
     def update_ypm_label(self):
+        # Call this method at a regular interval to update the plot
         average_ypm = self.calculate_average_ypm()
-        self.ypm_label.setText(f"YPM: {average_ypm:.2f}")
-        # Make sure this part is reached and values are correct
-        current_time = (datetime.now() - self.start_time).total_seconds() / 60
+        current_time = (
+            datetime.now() - self.start_time
+        ).total_seconds() / 60  # Current time in minutes
+        self.time_data2.append(current_time)
         self.ypm_data.append(average_ypm)
-        self.ypm_curve.setData(list(self.time_data), list(self.ypm_data))
+        self.ypm_curve.setData(
+            list(self.time_data2), list(self.ypm_data)
+        )  # Update the plot data
+        self.ypm_label.setText(f"YPM: {average_ypm:.2f}")   
+        self.update_yawn_threshold_label(average_ypm)
+        
+
+        
+        
 
     @pyqtSlot()
     def update_yawn_count(self):
         print(self.yawns)
         self.yawns += 1
+        if self.eye_fatigue_threshold is None:  
+            self.calculate_yawn_fatigue_threshold()
+            
         self.update.emit()
+        
+        
+    def calculate_yawn_fatigue_threshold(self):
+        if self.yawn_fatigue_threshold is None:
+            elapsed_time = datetime.now() - self.start_time
+            if elapsed_time.total_seconds() >= 10:  # Assuming 10 seconds for example
+                self.yawn_fatigue_threshold = self.calculate_average_ypm() * 1.5
+                self.add_yawn_threshold_line()        
+                
+    def add_yawn_threshold_line(self):
+        # Add the threshold line only if it hasn't been added yet
+        if self.yawn_threshold_line is None:
+            self.yawn_threshold_line = pg.InfiniteLine(
+                angle=0,  # Horizontal line
+                pos=self.yawn_fatigue_threshold,  # Position at the eye fatigue threshold value
+                pen=pg.mkPen('w', width=2)  # White line
+            )
+            self.ypm_plot_widget.addItem(self.yawn_threshold_line)
+            print(self.yawn_fatigue_threshold)
+            self.yawn_fatigue_threshold_label.setText(f"Yawn Fatigue Threshold: {self.yawn_fatigue_threshold:.2f} YPM")      
+                      
 
+    def update_yawn_threshold_label(self, average_ypm):
+        if self.yawn_fatigue_threshold is not None:
+
+            if average_ypm > self.yawn_fatigue_threshold:
+                self.yawn_fatigue_threshold_label.setText("Yawn Fatigue")
+                self.yawn_fatigue_threshold_label.setStyleSheet("color: red")
+            else:
+                self.yawn_fatigue_threshold_label.setText(f"Yawn Threshold ={self.yawn_fatigue_threshold: .2f} YPM: OK")
+                self.yawn_fatigue_threshold_label.setStyleSheet("color: green")
+                
     @pyqtSlot(float)
     def update_ear(self, val):
         self.ear = val
