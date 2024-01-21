@@ -64,7 +64,7 @@ RIGHT_EYE_INDICES = [
 UPPER_LIP_INDICES = [13, 312, 311, 310, 415, 308, 324, 318, 402, 317]
 LOWER_LIP_INDICES = [14, 87, 178, 88, 95, 78, 191, 80, 81, 82]
 
-
+NOSE_TIP_INDEX = 1
 
 
 
@@ -116,11 +116,52 @@ class CameraStream(QThread):
         frame_rgb = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2RGB)
         self.hand_results = self.hands.process(frame_rgb)
 
+
+
     def face_feature_detection_worker(self, frame):
-        # Blink detection
-        frame_rgb = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2RGB)
+        # Convert to RGB once
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         self.face_results = self.face_mesh.process(frame_rgb)
 
+        if self.face_results.multi_face_landmarks:
+            for face_landmarks in self.face_results.multi_face_landmarks:
+                # Print for debugging
+
+                # Looking down detection
+                if CameraStream.is_looking_down(face_landmarks):
+                    print("Looking down detected")  # This should now print if the method is reached
+
+                # Additional print for debugging
+                else:
+                    print("Looking down NOT detected")
+
+    @staticmethod
+    def is_looking_down(face_landmarks):
+        # Extract the eye and nose landmarks
+        nose_tip = np.array([face_landmarks.landmark[NOSE_TIP_INDEX].x, face_landmarks.landmark[NOSE_TIP_INDEX].y])
+        left_eye = CameraStream.get_feature_landmarks(face_landmarks.landmark, LEFT_EYE_INDICES)
+        right_eye = CameraStream.get_feature_landmarks(face_landmarks.landmark, RIGHT_EYE_INDICES)
+
+        # Calculate average eye position
+        avg_eye_y = np.mean([ey[1] for ey in left_eye + right_eye])
+
+        # Define a threshold for looking down, appropriate for normalized coordinates
+        LOOK_DOWN_THRESHOLD = 0.103 # Adjust based on testing  0.1
+
+        # Check if average eye Y position is less than the nose tip Y position by the threshold
+        looking_down = avg_eye_y < nose_tip[1] - LOOK_DOWN_THRESHOLD
+
+        # Debugging prints
+        #print(f"Average Eye Y: {avg_eye_y}, Nose Tip Y: {nose_tip[1]}, Threshold: {LOOK_DOWN_THRESHOLD}, Looking Down: {looking_down}")
+
+        return looking_down
+
+
+
+
+
+
+                        
     def draw_hands(self, frame):
         # Hand detection
         if self.hand_results is not None and self.hand_results.multi_hand_landmarks:
