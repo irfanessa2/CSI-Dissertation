@@ -122,18 +122,16 @@ class CameraStream(QThread):
         # Convert to RGB once
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         self.face_results = self.face_mesh.process(frame_rgb)
-
         if self.face_results.multi_face_landmarks:
             for face_landmarks in self.face_results.multi_face_landmarks:
                 # Print for debugging
-
                 # Looking down detection
                 if CameraStream.is_looking_down(face_landmarks):
                     print("Looking down detected")  # This should now print if the method is reached
-
                 # Additional print for debugging
                 else:
                     print("Looking down NOT detected")
+
 
     @staticmethod
     def is_looking_down(face_landmarks):
@@ -169,6 +167,7 @@ class CameraStream(QThread):
                 mp_drawing.draw_landmarks(
                     frame, hand_landmarks, mp_hands.HAND_CONNECTIONS
                 )
+                
 
     def draw_face_features(self, frame):
         # face detection
