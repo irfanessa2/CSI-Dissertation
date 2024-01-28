@@ -2,10 +2,11 @@ from collections import deque
 import time
 import cv2
 import mediapipe as mp
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, Qt, QTimer
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
+    QStackedWidget,
     QLabel,
     QVBoxLayout,
     QWidget,
@@ -68,25 +69,28 @@ NOSE_TIP_INDEX = 1
 
 
 
-
-
-class CameraStream(QThread):
-    change_pixmap_signal = pyqtSignal(QImage)
+class CameraSignals(QObject):
     ear_signal = pyqtSignal(float)
     mar_signal = pyqtSignal(float)
     eyes_closed_signal = pyqtSignal()
     eyes_open_signal = pyqtSignal()
     latency_signal = pyqtSignal(object)
 
+
+class CameraStream(QThread):
+    change_pixmap_signal = pyqtSignal(QImage)
+    looking_direction = pyqtSignal(int)
+
     def __init__(self, src=0, parent=None):
         super().__init__(parent)
         self.src = src
+        self.signals = CameraSignals()
         self.stopped = False
         self.hands = mp_hands.Hands()
         self.face_mesh = mp_face_mesh.FaceMesh()
         self.ear_threshold = 0.40  # 0.21 before
-        self.blinked = False
-        self.opened = False
+        #self.blinked = False
+        #self.opened = False
         self.face_feature_detection_thread = Thread()
         self.hand_detection_thread = Thread()
         self.face_results = None
@@ -95,6 +99,7 @@ class CameraStream(QThread):
         self.do_hands = False
         self.do_blink = False
         self.do_yawn = False
+        self.printed_once = None
 
     @pyqtSlot(bool)
     def set_do_hands(self, val):
@@ -127,10 +132,16 @@ class CameraStream(QThread):
                 # Print for debugging
                 # Looking down detection
                 if CameraStream.is_looking_down(face_landmarks):
-                    print("Looking down detected")  # This should now print if the method is reached
+                    if not self.printed_once:
+                        print("Looking down detected")  # This should now print if the method is reached
+                        self.printed_once = True
+                    self.looking_direction.emit(1)
                 # Additional print for debugging
                 else:
-                    print("Looking down NOT detected")
+                    if self.printed_once:
+                        print("Looking down NOT detected")
+                        self.looking_direction.emit(0)
+                        self.printed_once = False
 
 
     @staticmethod
@@ -199,26 +210,21 @@ class CameraStream(QThread):
                     left_ear = self.calculate_ar(left_eye)
                     right_ear = self.calculate_ar(right_eye)
                     ear = (left_ear + right_ear) / 2.0
-                    self.ear_signal.emit(ear)
+                    self.signals.ear_signal.emit(ear)
 
                     feature_points = feature_points + right_eye + left_eye
 
                     if ear < self.ear_threshold:
-                        if not self.blinked:
-                            self.blinked = True
-                            self.opened = False
-                            self.eyes_closed_signal.emit()
-                    elif not self.opened:
-                        self.opened = True
-                        self.blinked = False
-                        self.eyes_open_signal.emit()
+                        self.signals.eyes_closed_signal.emit()
+                    else:
+                        self.signals.eyes_open_signal.emit()
 
                 if self.do_yawn:
                     mouth = self.get_feature_landmarks(
                         face_landmarks.landmark, UPPER_LIP_INDICES + LOWER_LIP_INDICES
                     )
                     mar = self.calculate_ar(mouth)
-                    self.mar_signal.emit(mar)
+                    self.signals.mar_signal.emit(mar)
 
                     feature_points = feature_points + mouth
 
@@ -240,7 +246,7 @@ class CameraStream(QThread):
         cap = cv2.VideoCapture(self.src)
 
         while not self.stopped:
-            self.latency_signal.emit(time.time_ns())
+            self.signals.latency_signal.emit(time.time_ns())
             ret, frame = cap.read()
             if ret:
                 if self.do_hands:
@@ -327,6 +333,7 @@ class TestingWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Testing Window")
+        
         self.resize(900, 480)
         self.blinks = 0
         
@@ -340,6 +347,7 @@ class TestingWindow(QWidget):
         self.start_time = datetime.now()  # Initialize the start time
         self.ear = 0.0
         self.yawns = 0
+        self.frame_ts = 0
         self._last_frame_ts = 0
         self.fps = deque(maxlen=10)
         self.latency = deque(maxlen=10)
@@ -371,9 +379,13 @@ class TestingWindow(QWidget):
         self.ypm_curve = self.ypm_plot_widget.plot(pen="r")
 
         self.image_label = QLabel(self)
+        self.image_label_bot = QLabel(self)
         self.blink_count_label = QLabel(self)
         self.yawn_count_label = QLabel(self)
-        self.stream = CameraStream(0, self)  # Replace with your actual CameraStream
+        self.cameras = [
+            CameraStream(0, self),  # Replace with your actual CameraStream
+            CameraStream(2, self)
+            ]
         self.fps_label = QLabel("FPS: 0", self)
         self.bpm_label = QLabel("BPM: 0", self)  # Use for displaying text BPM
         self.ypm_label = QLabel("YPM: 0", self)  # Use for displaying text YPM
@@ -402,6 +414,7 @@ class TestingWindow(QWidget):
         self.yawn_toggle = QRadioButton("Yawn Detection", self, autoExclusive=False)
 
         self.is_yawning = False
+        self.opened_eyes_triggered = False
 
         self.sleep_bar = QProgressBar(self)
         self.sleep_bar.setMaximum(3 * 1000)
@@ -434,7 +447,10 @@ class TestingWindow(QWidget):
         )  # Add the plot widget to the stats layout
         stats_layout.addWidget(self.ypm_plot_widget)
 
-        main_layout.addWidget(self.image_label)
+        self. sw = QStackedWidget(self)
+        self.sw.addWidget(self.image_label)
+        self.sw.addWidget(self.image_label_bot)
+        main_layout.addWidget(self.sw)
         main_layout.addLayout(stats_layout)
 
         self.setLayout(main_layout)
@@ -453,21 +469,62 @@ class TestingWindow(QWidget):
             lambda: self.do_yawn.emit(self.yawn_toggle.isChecked())
         )
 
-        self.do_face.connect(self.stream.set_do_face)
-        self.do_hands.connect(self.stream.set_do_hands)
-        self.do_blink.connect(self.stream.set_do_blink)
-        self.do_yawn.connect(self.stream.set_do_yawn)
+        [self.do_face.connect(cam.set_do_face) for cam in self.cameras]
+        [self.do_hands.connect(cam.set_do_hands) for cam in self.cameras]
+        [self.do_blink.connect(cam.set_do_blink) for cam in self.cameras]
+        [self.do_yawn.connect(cam.set_do_yawn) for cam in self.cameras]
+        #self.do_face.connect(self.stream.set_do_face)
+        #self.do_hands.connect(self.stream.set_do_hands)
+        #self.do_blink.connect(self.stream.set_do_blink)
+        #self.do_yawn.connect(self.stream.set_do_yawn)
+        #
+        #self.do_face.connect(self.bot_cam.set_do_face)
+        #self.do_hands.connect(self.bot_cam.set_do_hands)
+        #self.do_blink.connect(self.bot_cam.set_do_blink)
+        #self.do_yawn.connect(self.bot_cam.set_do_yawn)
         
-        self.stream.latency_signal.connect(self.latency_update)
-        self.stream.change_pixmap_signal.connect(self.update_image)
-        self.stream.ear_signal.connect(self.update_ear)
-        self.stream.eyes_closed_signal.connect(self.update_blink_count)
-        self.stream.eyes_closed_signal.connect(self.start_closed_eyes_timer)
-        self.stream.eyes_open_signal.connect(self.start_open_eyes_timer)
-        self.stream.mar_signal.connect(self.update_mar)
+        self.cameras[0].looking_direction.connect(self.change_view)
+        #self.stream.latency_signal.connect(self.latency_update)
+        self.cameras[0].change_pixmap_signal.connect(self.update_image)
+        #self.stream.ear_signal.connect(self.update_ear)
+        #self.stream.eyes_closed_signal.connect(self.update_blink_count)
+        #self.stream.eyes_closed_signal.connect(self.start_closed_eyes_timer)
+        #self.stream.eyes_open_signal.connect(self.start_open_eyes_timer)
+        #self.stream.mar_signal.connect(self.update_mar)
+
+        #self.bot_cam.latency_signal.connect(self.latency_update)
+        #self.bot_cam.change_pixmap_signal.connect(self.update_image)
+        #self.bot_cam.ear_signal.connect(self.update_ear)
+        #self.bot_cam.eyes_closed_signal.connect(self.update_blink_count)
+        #self.bot_cam.eyes_closed_signal.connect(self.start_closed_eyes_timer)
+        #self.bot_cam.eyes_open_signal.connect(self.start_open_eyes_timer)
+        #self.bot_cam.mar_signal.connect(self.update_mar)
         self.update.connect(self.update_values)
-        self.stream.start()
+        self.cameras[1].change_pixmap_signal.connect(self.update_image_bot)
+        [cam.start() for cam in self.cameras]
         self.update_values()
+        self.connect_signals(self.cameras[0])
+
+    def connect_signals(self, camera):
+        cam_sig = camera.signals
+        cam_sig.latency_signal.connect(self.latency_update)
+        cam_sig.ear_signal.connect(self.update_ear)
+        cam_sig.mar_signal.connect(self.update_mar)
+        cam_sig.eyes_closed_signal.connect(self.update_blink_count)
+        cam_sig.eyes_closed_signal.connect(self.start_closed_eyes_timer)
+        cam_sig.eyes_open_signal.connect(self.start_open_eyes_timer)
+
+    def disconnect_signals(self, camera):
+        for attr in dir(camera.signals):
+            if attr.endswith('signal'):
+                getattr(camera.signals, attr).disconnect() 
+
+    @pyqtSlot(int)
+    def change_view(self, view):
+        if self.sw.currentIndex() != view:
+            self.sw.setCurrentIndex(view)
+            self.disconnect_signals(self.cameras[view-1])
+            self.connect_signals(self.cameras[view])
 
     @pyqtSlot(float)
     def update_mar(self, val):
@@ -486,12 +543,16 @@ class TestingWindow(QWidget):
         self.yawn_type.setText(yawn_type)
 
     def start_closed_eyes_timer(self):
-        self.stop_all_timers()
-        self.eyes_closed_timer.start()
+        if self.opened_eyes_triggered:
+            self.stop_all_timers()
+            self.eyes_closed_timer.start()
+            self.opened_eyes_triggered = False
 
     def start_open_eyes_timer(self):
-        self.stop_all_timers()
-        self.eyes_opened_timer.start()
+        if not self.opened_eyes_triggered:
+            self.stop_all_timers()
+            self.eyes_opened_timer.start()
+            self.opened_eyes_triggered = True
 
     def stop_all_timers(self):
         if self.eyes_closed_timer.isActive():
@@ -530,6 +591,18 @@ class TestingWindow(QWidget):
         self.update_bpm_label()
         self.update_ypm_label()
         self.image_label.setPixmap(QPixmap.fromImage(image))
+
+    @pyqtSlot(QImage)
+    def update_image_bot(self, image):
+       # frame_ts = time.time_ns()
+       # self.fps.append(frame_ts - self._last_frame_ts)
+       # self._last_frame_ts = frame_ts
+       # self.latency.append(time.time_ns() - self.frame_ts)
+       # self.latency_label.setText(f"Latency: {np.mean(self.latency)/1e6:.2f}ms")
+       # self.fps_label.setText(f"FPS: {1e9/np.mean(self.fps):.2f}")
+       # self.update_bpm_label()
+       # self.update_ypm_label()
+        self.image_label_bot.setPixmap(QPixmap.fromImage(image))
 
     @pyqtSlot()
     def update_values(self):
@@ -674,8 +747,7 @@ class TestingWindow(QWidget):
         self.update.emit()
 
     def closeEvent(self, event):
-        self.stream.stop()
-
+        [cam.stop() for cam in self.cameras]
 
 if __name__ == "__main__":
     import sys
