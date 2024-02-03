@@ -14,7 +14,7 @@ class Testing_Button(QWidget):
         button_layout = QHBoxLayout()
         button_layout.addStretch()  # Add stretch to center horizontally
 
-        self.button = QPushButton("Testing", self)
+        self.button = QPushButton("MediaPipe", self)
         self.button.setFixedSize(150, 50)  # Set fixed size for the button
         button_layout.addWidget(self.button)
 
