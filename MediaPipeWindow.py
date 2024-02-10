@@ -1,329 +1,15 @@
 from collections import deque
 import time
-import cv2
-import mediapipe as mp
-from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, Qt, QTimer
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import (
-    QApplication,
-    QStackedWidget,
-    QLabel,
-    QVBoxLayout,
-    QWidget,
-    QRadioButton,
-    QHBoxLayout,
-    QProgressBar,
-)
+from PyQt5.QtWidgets import QStackedWidget,QLabel,QVBoxLayout,QWidget,QRadioButton,QHBoxLayout,QProgressBar
 import pyqtgraph as pg
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
-from threading import Thread
-
-printed = False
-mp_drawing = mp.solutions.drawing_utils
-mp_hands = mp.solutions.hands
-mp_face_mesh = mp.solutions.face_mesh
-
-LEFT_EYE_INDICES = [
-    362,
-    382,
-    381,
-    380,
-    374,
-    373,
-    390,
-    249,
-    263,
-    466,
-    388,
-    387,
-    386,
-    385,
-    384,
-    398,
-]
-RIGHT_EYE_INDICES = [
-    133,
-    153,
-    154,
-    155,
-    145,
-    144,
-    163,
-    7,
-    33,
-    246,
-    161,
-    160,
-    159,
-    158,
-    157,
-    173,
-]
+from QWorker import CameraStream
 
 
-UPPER_LIP_INDICES = [13, 312, 311, 310, 415, 308, 324, 318, 402, 317]
-LOWER_LIP_INDICES = [14, 87, 178, 88, 95, 78, 191, 80, 81, 82]
-
-NOSE_TIP_INDEX = 1
-
-
-
-class CameraSignals(QObject):
-    ear_signal = pyqtSignal(float)
-    mar_signal = pyqtSignal(float)
-    eyes_closed_signal = pyqtSignal()
-    eyes_open_signal = pyqtSignal()
-    latency_signal = pyqtSignal(object)
-
-
-class CameraStream(QThread):
-    change_pixmap_signal = pyqtSignal(QImage)
-    looking_direction = pyqtSignal(int)
-
-    def __init__(self, src=0, parent=None):
-        super().__init__(parent)
-        self.src = src
-        self.signals = CameraSignals()
-        self.stopped = False
-        self.hands = mp_hands.Hands()
-        self.face_mesh = mp_face_mesh.FaceMesh()
-        self.ear_threshold = 0.40  # 0.21 before
-        #self.blinked = False
-        #self.opened = False
-        self.face_feature_detection_thread = Thread()
-        self.hand_detection_thread = Thread()
-        self.face_results = None
-        self.hand_results = None
-        self.do_face = False
-        self.do_hands = False
-        self.do_blink = False
-        self.do_yawn = False
-        self.printed_once = None
-
-    @pyqtSlot(bool)
-    def set_do_hands(self, val):
-        self.do_hands = val
-
-    @pyqtSlot(bool)
-    def set_do_face(self, val):
-        self.do_face = val
-
-    @pyqtSlot(bool)
-    def set_do_yawn(self, val):
-        self.do_yawn = val
-
-    @pyqtSlot(bool)
-    def set_do_blink(self, val):
-        self.do_blink = val
-
-    def hand_detection_worker(self, frame):
-        frame_rgb = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2RGB)
-        self.hand_results = self.hands.process(frame_rgb)
-
-
-
-    def face_feature_detection_worker(self, frame):
-        # Convert to RGB once
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        self.face_results = self.face_mesh.process(frame_rgb)
-        if self.face_results.multi_face_landmarks:
-            for face_landmarks in self.face_results.multi_face_landmarks:
-                # Print for debugging
-                # Looking down detection
-                if CameraStream.is_looking_down(face_landmarks):
-                    if not self.printed_once:
-                        print("Looking down detected")  # This should now print if the method is reached
-                        self.printed_once = True
-                    self.looking_direction.emit(1)
-                # Additional print for debugging
-                else:
-                    if self.printed_once:
-                        print("Looking down NOT detected")
-                        self.looking_direction.emit(0)
-                        self.printed_once = False
-
-
-    @staticmethod
-    def is_looking_down(face_landmarks):
-        # Extract the eye and nose landmarks
-        nose_tip = np.array([face_landmarks.landmark[NOSE_TIP_INDEX].x, face_landmarks.landmark[NOSE_TIP_INDEX].y])
-        left_eye = CameraStream.get_feature_landmarks(face_landmarks.landmark, LEFT_EYE_INDICES)
-        right_eye = CameraStream.get_feature_landmarks(face_landmarks.landmark, RIGHT_EYE_INDICES)
-
-        # Calculate average eye position
-        avg_eye_y = np.mean([ey[1] for ey in left_eye + right_eye])
-
-        # Define a threshold for looking down, appropriate for normalized coordinates
-        LOOK_DOWN_THRESHOLD = 0.103 # Adjust based on testing  0.1
-
-        # Check if average eye Y position is less than the nose tip Y position by the threshold
-        looking_down = avg_eye_y < nose_tip[1] - LOOK_DOWN_THRESHOLD
-
-        # Debugging prints
-        #print(f"Average Eye Y: {avg_eye_y}, Nose Tip Y: {nose_tip[1]}, Threshold: {LOOK_DOWN_THRESHOLD}, Looking Down: {looking_down}")
-
-        return looking_down
-
-
-
-
-
-
-                        
-    def draw_hands(self, frame):
-        # Hand detection
-        if self.hand_results is not None and self.hand_results.multi_hand_landmarks:
-            for hand_landmarks in self.hand_results.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(
-                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS
-                )
-                
-
-    def draw_face_features(self, frame):
-        # face detection
-        if self.face_results is not None and self.face_results.multi_face_landmarks:
-            for face_landmarks in self.face_results.multi_face_landmarks:
-                if self.do_face:
-                    for point in [
-                        np.array([lm.x, lm.y]) for lm in face_landmarks.landmark
-                    ]:
-                        cv2.circle(
-                            frame,
-                            (
-                                int(point[0] * frame.shape[1]),
-                                int(point[1] * frame.shape[0]),
-                            ),
-                            1,
-                            (0, 255, 0),
-                            -1,
-                        )
-
-                feature_points = []
-                if self.do_blink:
-                    left_eye = self.get_feature_landmarks(
-                        face_landmarks.landmark, LEFT_EYE_INDICES
-                    )
-                    right_eye = self.get_feature_landmarks(
-                        face_landmarks.landmark, RIGHT_EYE_INDICES
-                    )
-                    left_ear = self.calculate_ar(left_eye)
-                    right_ear = self.calculate_ar(right_eye)
-                    ear = (left_ear + right_ear) / 2.0
-                    self.signals.ear_signal.emit(ear)
-
-                    feature_points = feature_points + right_eye + left_eye
-
-                    if ear < self.ear_threshold:
-                        self.signals.eyes_closed_signal.emit()
-                    else:
-                        self.signals.eyes_open_signal.emit()
-
-                if self.do_yawn:
-                    mouth = self.get_feature_landmarks(
-                        face_landmarks.landmark, UPPER_LIP_INDICES + LOWER_LIP_INDICES
-                    )
-                    mar = self.calculate_ar(mouth)
-                    self.signals.mar_signal.emit(mar)
-
-                    feature_points = feature_points + mouth
-
-                for point in feature_points:
-                    cv2.circle(
-                        frame,
-                        (
-                            int(point[0] * frame.shape[1]),
-                            int(point[1] * frame.shape[0]),
-                        ),
-                        1,
-                        (0, 0, 255),
-                        -1,
-                    )
-
-        return frame
-
-    def run(self):
-        cap = cv2.VideoCapture(self.src)
-
-        while not self.stopped:
-            self.signals.latency_signal.emit(time.time_ns())
-            ret, frame = cap.read()
-            if ret:
-                if self.do_hands:
-                    self.service_thread(
-                        "hand_detection_thread",
-                        self.hand_detection_worker,
-                        (frame.copy(),),
-                    )
-                    self.draw_hands(frame)
-                else:
-                    self.hand_results = None
-
-                if self.do_face or self.do_blink or self.do_yawn:
-                    self.service_thread(
-                        "face_feature_detection_thread",
-                        self.face_feature_detection_worker,
-                        (frame.copy(),),
-                    )
-                    self.draw_face_features(frame)
-                else:
-                    self.face_results = None
-
-                qimg = self.convert_to_qimage(frame)
-                self.change_pixmap_signal.emit(qimg)
-
-        cap.release()
-        self.hands.close()
-        self.face_mesh.close()
-
-    def service_thread(self, thread, method, args=()):
-        if not getattr(self, thread).is_alive():
-            setattr(
-                self,
-                thread,
-                Thread(target=method, args=args, name=f"{method.__name__}"),
-            )
-            getattr(self, thread).start()
-
-    def stop(self):
-        self.stopped = True
-        self.wait()
-
-    @staticmethod
-    def calculate_area(points):
-        points = np.array(points)
-        x = points[:,0]
-        y = points[:,1]
-        
-        s1 = np.sum(x*np.roll(y,-1))
-        s2 = np.sum(y*np.roll(x,-1))
-        
-        return np.absolute(s1-s2)/2
-        
-    @staticmethod
-    def calculate_ar(eye):
-        global printed
-        if not printed:
-            printed = True
-            #print(eye)
-        min_x, min_y = np.min(eye, axis=0)
-        max_x, max_y = np.max(eye, axis=0)
-        return (max_y - min_y) / (max_x - min_x)
-
-    @staticmethod
-    def get_feature_landmarks(landmarks, indices):
-        return [np.array([landmarks[i].x, landmarks[i].y]) for i in indices]
-
-    @staticmethod
-    def convert_to_qimage(frame):
-        h, w, ch = frame.shape
-        bytes_per_line = ch * w
-        return QImage(frame.data, w, h, bytes_per_line, QImage.Format_BGR888).scaled(
-            640, 480, Qt.KeepAspectRatio
-        )
-
-
-class TestingWindow(QWidget):
+class MediaPipeWindow(QWidget):
     update = pyqtSignal()
     do_face = pyqtSignal(bool)
     do_hands = pyqtSignal(bool)
@@ -332,7 +18,7 @@ class TestingWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Testing Window")
+        self.setWindowTitle("MediaPipe")
         
         self.resize(900, 480)
         self.blinks = 0
@@ -397,11 +83,8 @@ class TestingWindow(QWidget):
         self.asleep_label.setStyleSheet("color:red")
         self.asleep_label.hide()
 
-
-
         self.eye_fatigue_threshold_label = QLabel("Eye Fatigue Threshold: Calculating...", self)
         self.yawn_fatigue_threshold_label = QLabel("Yawn Threshold: Calculating...", self)
-
         
         main_layout = QHBoxLayout()
         stats_layout = QVBoxLayout()
@@ -594,14 +277,14 @@ class TestingWindow(QWidget):
 
     @pyqtSlot(QImage)
     def update_image_bot(self, image):
-       # frame_ts = time.time_ns()
-       # self.fps.append(frame_ts - self._last_frame_ts)
-       # self._last_frame_ts = frame_ts
-       # self.latency.append(time.time_ns() - self.frame_ts)
-       # self.latency_label.setText(f"Latency: {np.mean(self.latency)/1e6:.2f}ms")
-       # self.fps_label.setText(f"FPS: {1e9/np.mean(self.fps):.2f}")
-       # self.update_bpm_label()
-       # self.update_ypm_label()
+        frame_ts = time.time_ns()
+        self.fps.append(frame_ts - self._last_frame_ts)
+        self._last_frame_ts = frame_ts
+        self.latency.append(time.time_ns() - self.frame_ts)
+        self.latency_label.setText(f"Latency: {np.mean(self.latency)/1e6:.2f}ms")
+        self.fps_label.setText(f"FPS: {1e9/np.mean(self.fps):.2f}")
+        self.update_bpm_label()
+        self.update_ypm_label()
         self.image_label_bot.setPixmap(QPixmap.fromImage(image))
 
     @pyqtSlot()
@@ -641,7 +324,6 @@ class TestingWindow(QWidget):
         self.update_blink_threshold_label(average_bpm)
         
              
-
     def calculate_eye_fatigue_threshold(self):
         if self.eye_fatigue_threshold is None:
             elapsed_time = datetime.now() - self.start_time
@@ -697,17 +379,13 @@ class TestingWindow(QWidget):
         self.ypm_label.setText(f"YPM: {average_ypm:.2f}")   
         self.update_yawn_threshold_label(average_ypm)
         
-
-        
-        
-
+            
     @pyqtSlot()
     def update_yawn_count(self):
         print(self.yawns)
         self.yawns += 1
         if self.eye_fatigue_threshold is None:  
             self.calculate_yawn_fatigue_threshold()
-            
         self.update.emit()
         
         
@@ -741,18 +419,12 @@ class TestingWindow(QWidget):
                 self.yawn_fatigue_threshold_label.setText(f"Yawn Threshold ={self.yawn_fatigue_threshold: .2f} YPM: OK")
                 self.yawn_fatigue_threshold_label.setStyleSheet("color: green")
                 
+                
     @pyqtSlot(float)
     def update_ear(self, val):
         self.ear = val
         self.update.emit()
 
-    def closeEvent(self, event):
-        [cam.stop() for cam in self.cameras]
 
-if __name__ == "__main__":
-    import sys
 
-    app = QApplication(sys.argv)
-    mainWin = TestingWindow()
-    mainWin.show()
-    sys.exit(app.exec_())
+
