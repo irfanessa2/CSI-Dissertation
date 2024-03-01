@@ -75,6 +75,7 @@ class MediaPipeWindow(QWidget):
         self.fps_label = QLabel("FPS: 0", self)
         self.bpm_label = QLabel("BPM: 0", self)  # Use for displaying text BPM
         self.ypm_label = QLabel("YPM: 0", self)  # Use for displaying text YPM
+        self.tilt_label = QLabel("Tilt: 0", self)  # Use for displaying text YPM
 
         self.mar = QLabel("Mouth AR:", self)
         self.yawn_type = QLabel(self)
@@ -110,6 +111,7 @@ class MediaPipeWindow(QWidget):
         frame_stats_layout.addWidget(self.latency_label)
         frame_stats_layout.addWidget(self.bpm_label)
         frame_stats_layout.addWidget(self.ypm_label)
+        frame_stats_layout.addWidget(self.tilt_label)
         
         stats_layout.addWidget(self.eye_fatigue_threshold_label)
         stats_layout.addWidget(self.yawn_fatigue_threshold_label)
@@ -166,7 +168,7 @@ class MediaPipeWindow(QWidget):
         #self.do_blink.connect(self.bot_cam.set_do_blink)
         #self.do_yawn.connect(self.bot_cam.set_do_yawn)
         
-        self.cameras[0].looking_direction.connect(self.change_view)
+        self.cameras[0].looking_direction.connect(self.change_view)       #LOOKING DOWN HERE
         #self.stream.latency_signal.connect(self.latency_update)
         self.cameras[0].change_pixmap_signal.connect(self.update_image)
         #self.stream.ear_signal.connect(self.update_ear)
@@ -193,6 +195,7 @@ class MediaPipeWindow(QWidget):
         cam_sig.latency_signal.connect(self.latency_update)
         cam_sig.ear_signal.connect(self.update_ear)
         cam_sig.mar_signal.connect(self.update_mar)
+        cam_sig.tilt_signal.connect(self.update_tilt)
         cam_sig.eyes_closed_signal.connect(self.update_blink_count)
         cam_sig.eyes_closed_signal.connect(self.start_closed_eyes_timer)
         cam_sig.eyes_open_signal.connect(self.start_open_eyes_timer)
@@ -201,6 +204,14 @@ class MediaPipeWindow(QWidget):
         for attr in dir(camera.signals):
             if attr.endswith('signal'):
                 getattr(camera.signals, attr).disconnect() 
+                
+    @pyqtSlot(float)
+    def update_tilt(self, a):
+        #angle comes in in radians, convert to degrees
+        def rad2deg(rad):
+            return round((180/np.pi)*rad)
+        text = str(rad2deg(a))+u'\u00b0'
+        self.tilt_label.setText(text)
 
     @pyqtSlot(int)
     def change_view(self, view):
@@ -384,7 +395,7 @@ class MediaPipeWindow(QWidget):
     def update_yawn_count(self):
         print(self.yawns)
         self.yawns += 1
-        if self.eye_fatigue_threshold is None:  
+        if self.yawn_fatigue_threshold is None:  
             self.calculate_yawn_fatigue_threshold()
         self.update.emit()
         

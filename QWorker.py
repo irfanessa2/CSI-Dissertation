@@ -6,7 +6,6 @@ from PyQt5.QtGui import QImage
 import numpy as np
 from threading import Thread
 
-printed = False
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 mp_face_mesh = mp.solutions.face_mesh
@@ -18,10 +17,15 @@ LOWER_LIP_INDICES = [14, 87, 178, 88, 95, 78, 191, 80, 81, 82]
 NOSE_TIP_INDEX = 1
 
 
+RIGHT_EYE = [159,145,157,25]
+LEFT_EYE = [386,374,414,263]
+MOUTH = [13,14,78,308]
+
 
 class CameraSignals(QObject):
     ear_signal = pyqtSignal(float)
     mar_signal = pyqtSignal(float)
+    tilt_signal = pyqtSignal(float)
     eyes_closed_signal = pyqtSignal()
     eyes_open_signal = pyqtSignal()
     latency_signal = pyqtSignal(object)
@@ -144,16 +148,18 @@ class CameraStream(QThread):
                             -1,
                         )
 
+
                 feature_points = []
                 if self.do_blink:
                     left_eye = self.get_feature_landmarks(
                         face_landmarks.landmark, LEFT_EYE_INDICES
                     )
                     right_eye = self.get_feature_landmarks(
-                        face_landmarks.landmark, RIGHT_EYE_INDICES
+                        face_landmarks.landmark, RIGHT_EYE_INDICES 
                     )
-                    left_ear = self.calculate_ar(left_eye)
-                    right_ear = self.calculate_ar(right_eye)
+                    left_ear, tilt_l = self.calculate_ar(self.get_feature_landmarks(face_landmarks.landmark, LEFT_EYE))
+                    right_ear, tilt_r = self.calculate_ar(self.get_feature_landmarks(face_landmarks.landmark, RIGHT_EYE))
+                    self.signals.tilt_signal.emit((tilt_l+tilt_r)/2)
                     ear = (left_ear + right_ear) / 2.0
                     self.signals.ear_signal.emit(ear)
 
@@ -173,7 +179,7 @@ class CameraStream(QThread):
                     mouth = self.get_feature_landmarks(
                         face_landmarks.landmark, UPPER_LIP_INDICES + LOWER_LIP_INDICES
                     )
-                    mar = self.calculate_ar(mouth)
+                    mar, tilt = self.calculate_ar(self.get_feature_landmarks(face_landmarks.landmark, MOUTH))
                     self.signals.mar_signal.emit(mar)
 
                     feature_points = feature_points + mouth
@@ -227,6 +233,7 @@ class CameraStream(QThread):
         self.hands.close()
         self.face_mesh.close()
 
+
     def service_thread(self, thread, method, args=()):
         if not getattr(self, thread).is_alive():
             setattr(
@@ -242,15 +249,23 @@ class CameraStream(QThread):
 
         
     @staticmethod
-    def calculate_ar(eye):
-        global printed
-        if not printed:
-            printed = True
-            #print(eye)
-        min_x, min_y = np.min(eye, axis=0)
-        max_x, max_y = np.max(eye, axis=0)
-        return (max_y - min_y) / (max_x - min_x)
+    def calculate_ar(points):
+        #[ [topx,topy], [bottomx,bottomy], [leftx,lefty], [rightx,righty] ] 
+        
+        top, bottom, left, right = points
 
+        dx = np.linalg.norm(top-bottom)
+        dy = np.linalg.norm(left-right)      #d = difference, eucledian
+        
+        if dy > 0:
+            ar = dx/dy
+            tilt = np.arctan((left[1]-right[1])/(left[0]-right[0]))
+        else:
+            ar = -1
+            tilt = -1    
+        
+        return (ar, tilt)
+        
     @staticmethod
     def get_feature_landmarks(landmarks, indices):
         return [np.array([landmarks[i].x, landmarks[i].y]) for i in indices]
