@@ -42,7 +42,7 @@ class CameraStream(QThread):
         self.stopped = False
         self.hands = mp_hands.Hands()
         self.face_mesh = mp_face_mesh.FaceMesh()
-        self.ear_threshold = 0.40  # 0.21 before
+        self.ear_threshold = 1.0  # 0.21 before
         self.blinked = False
         self.opened = False
         self.face_feature_detection_thread = Thread()

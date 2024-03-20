@@ -2,7 +2,8 @@ from collections import deque
 import time
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import QStackedWidget,QLabel,QVBoxLayout,QWidget,QRadioButton,QHBoxLayout,QProgressBar
+from PyQt5.QtWidgets import QStackedWidget,QLabel,QVBoxLayout,QWidget,QRadioButton,QHBoxLayout,QProgressBar, QPushButton
+from QWorker import CameraStream
 import pyqtgraph as pg
 from datetime import datetime
 import numpy as np
@@ -18,8 +19,9 @@ class MediaPipeWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.camera_stream_instance = CameraStream()
+
         self.setWindowTitle("MediaPipe")
-        
         self.resize(900, 480)
         self.blinks = 0
         
@@ -121,6 +123,16 @@ class MediaPipeWindow(QWidget):
         stats_layout.addWidget(self.hands_toggle)
         stats_layout.addWidget(self.blink_toggle)
         stats_layout.addWidget(self.yawn_toggle)
+
+
+
+        self.calibrate_eye_threshold_button = QPushButton("Calibrate Eye Threshold (Click When Eyes Closed)", self)
+        stats_layout.addWidget(self.calibrate_eye_threshold_button)
+        self.calibrate_eye_threshold_button.clicked.connect(self.calibrate_blink_threshold)
+
+
+
+
         stats_layout.addWidget(QWidget())  # Placeholder widget
         stats_layout.addWidget(self.sleep_bar)
         stats_layout.addWidget(self.asleep_label)
@@ -158,6 +170,7 @@ class MediaPipeWindow(QWidget):
         [self.do_hands.connect(cam.set_do_hands) for cam in self.cameras]
         [self.do_blink.connect(cam.set_do_blink) for cam in self.cameras]
         [self.do_yawn.connect(cam.set_do_yawn) for cam in self.cameras]
+        
         #self.do_face.connect(self.stream.set_do_face)
         #self.do_hands.connect(self.stream.set_do_hands)
         #self.do_blink.connect(self.stream.set_do_blink)
@@ -168,7 +181,7 @@ class MediaPipeWindow(QWidget):
         #self.do_blink.connect(self.bot_cam.set_do_blink)
         #self.do_yawn.connect(self.bot_cam.set_do_yawn)
         
-        self.cameras[0].looking_direction.connect(self.change_view)       #LOOKING DOWN HERE
+        #self.cameras[0].looking_direction.connect(self.change_view)       #LOOKING DOWN HERE
         #self.stream.latency_signal.connect(self.latency_update)
         self.cameras[0].change_pixmap_signal.connect(self.update_image)
         #self.stream.ear_signal.connect(self.update_ear)
@@ -393,7 +406,7 @@ class MediaPipeWindow(QWidget):
             
     @pyqtSlot()
     def update_yawn_count(self):
-        print(self.yawns)
+        print(self.camera_stream_instance.ear_threshold)
         self.yawns += 1
         if self.yawn_fatigue_threshold is None:  
             self.calculate_yawn_fatigue_threshold()
@@ -429,8 +442,16 @@ class MediaPipeWindow(QWidget):
             else:
                 self.yawn_fatigue_threshold_label.setText(f"Yawn Threshold ={self.yawn_fatigue_threshold: .2f} YPM: OK")
                 self.yawn_fatigue_threshold_label.setStyleSheet("color: green")
-                
-                
+
+
+    def calibrate_blink_threshold(self):
+
+        camera_stream_instance = CameraStream()
+        self.camera_stream_instance.ear_threshold = self.ear
+
+        
+
+           
     @pyqtSlot(float)
     def update_ear(self, val):
         self.ear = val
