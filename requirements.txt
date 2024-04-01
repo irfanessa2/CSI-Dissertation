@@ -1,6 +1,6 @@
 opencv-python
 pyqt5
 numpy
-mediapipe
+mediapipe==0.10.09
 matplotlib
 pyqtgraph

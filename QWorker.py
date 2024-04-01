@@ -1,7 +1,7 @@
 import time
 import cv2
 import mediapipe as mp
-from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, Qt
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, Qt, QTimer
 from PyQt5.QtGui import QImage
 import numpy as np
 from threading import Thread
@@ -31,12 +31,12 @@ class CameraSignals(QObject):
     latency_signal = pyqtSignal(object)
 
 
-class CameraStream(QThread):
+class CameraStream(QObject):
     change_pixmap_signal = pyqtSignal(QImage)
     looking_direction = pyqtSignal(int)
 
-    def __init__(self, src=0, parent=None):
-        super().__init__(parent)
+    def __init__(self, src=0):
+        super().__init__()
         self.src = src
         self.signals = CameraSignals()
         self.stopped = False
@@ -54,6 +54,12 @@ class CameraStream(QThread):
         self.do_blink = False
         self.do_yawn = False
         self.printed_once = None
+        
+        self.cap = cv2.VideoCapture(src)
+        
+    @pyqtSlot(float)
+    def set_ear_threashold(self, ear):
+        self.ear_threshold = ear
 
     @pyqtSlot(bool)
     def set_do_hands(self, val):
@@ -197,39 +203,50 @@ class CameraStream(QThread):
                     )
         return frame
     
+    def run(self):
+        """ Make this thread async, fire of a read event every 1000//30 ms
+            this gives the event loop time to process signals
+            PS: there is no resource management, make sure to run in debugger
+                or kill -9 any ps aux | grep python"""
+        self.timer = QTimer()
+        self.timer.setInterval(1000//30) # 30fps
+        self.timer.timeout.connect(self._run)
+        self.timer.start()
+        
     
 
-    def run(self):
-        cap = cv2.VideoCapture(self.src)
+    def _run(self):
+        self.signals.latency_signal.emit(time.time_ns())
+        ret, frame = self.cap.read()
+        if ret:
+            if self.do_hands:
+                self.service_thread(
+                    "hand_detection_thread",
+                    self.hand_detection_worker,
+                    (frame.copy(),),
+                )
+                self.draw_hands(frame)
+            else:
+                self.hand_results = None
 
-        while not self.stopped:
-            self.signals.latency_signal.emit(time.time_ns())
-            ret, frame = cap.read()
-            if ret:
-                if self.do_hands:
-                    self.service_thread(
-                        "hand_detection_thread",
-                        self.hand_detection_worker,
-                        (frame.copy(),),
-                    )
-                    self.draw_hands(frame)
-                else:
-                    self.hand_results = None
+            if self.do_face or self.do_blink or self.do_yawn:
+                self.service_thread(
+                    "face_feature_detection_thread",
+                    self.face_feature_detection_worker,
+                    (frame.copy(),),
+                )
+                self.draw_face_features(frame)
+            else:
+                self.face_results = None
 
-                if self.do_face or self.do_blink or self.do_yawn:
-                    self.service_thread(
-                        "face_feature_detection_thread",
-                        self.face_feature_detection_worker,
-                        (frame.copy(),),
-                    )
-                    self.draw_face_features(frame)
-                else:
-                    self.face_results = None
-
-                qimg = self.convert_to_qimage(frame)
-                self.change_pixmap_signal.emit(qimg)
-
-        cap.release()
+            qimg = self.convert_to_qimage(frame)
+            self.change_pixmap_signal.emit(qimg)
+    
+    @pyqtSlot()
+    def close(self):
+        self.timer.stop()
+        self.timer.deleteLater()
+        self.cap.release()
         self.hands.close()
         self.face_mesh.close()
 
