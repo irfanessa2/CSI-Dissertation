@@ -26,6 +26,7 @@ class MediaPipeWindow(QWidget):
         self.blinks = 0
         
         self.eye_fatigue_threshold = None
+        
         self.blink_threshold_line = None
         
         self.yawn_fatigue_threshold = None
@@ -127,10 +128,25 @@ class MediaPipeWindow(QWidget):
 
 
         self.calibrate_eye_threshold_button = QPushButton("Calibrate Eye Threshold (Click When Eyes Closed)", self)
+        self.calibrate_yawn_threshold_button = QPushButton("Calibrate Yawn Threshold (Click When Mouth fully open)", self)
+        self.calibrate_talking_threshold_button = QPushButton("Calibrate Talking Threshold (Click When mouth somewhat open)", self)
+        self.calibrate_lookingdown_threshold_button = QPushButton("Calibrate Looking Down Threshold (Click When looking down)", self)
+
+
+
+        
+        
         stats_layout.addWidget(self.calibrate_eye_threshold_button)
         self.calibrate_eye_threshold_button.clicked.connect(self.calibrate_blink_threshold)
 
-
+        stats_layout.addWidget(self.calibrate_yawn_threshold_button)
+        self.calibrate_yawn_threshold_button.clicked.connect(self.calibrate_yawn_threshold)
+        
+        stats_layout.addWidget(self.calibrate_talking_threshold_button)
+        self.calibrate_talking_threshold_button.clicked.connect(self.calibrate_talking_threshold)
+        
+        stats_layout.addWidget(self.calibrate_lookingdown_threshold_button)
+        self.calibrate_lookingdown_threshold_button.clicked.connect(self.calibrate_lookingdown_threshold)
 
 
         stats_layout.addWidget(QWidget())  # Placeholder widget
@@ -254,7 +270,7 @@ class MediaPipeWindow(QWidget):
     @pyqtSlot(float)
     def update_mar(self, val):
         self.mar.setText(f"Mouth AR: {val:.2f}")
-        if val > 0.8:
+        if val > self.calibrate_yawn_threshold:
             yawn_type = "YAWNING"
             if not self.is_yawning:  # Check if transition to yawning state
                 self.is_yawning = True
@@ -464,6 +480,20 @@ class MediaPipeWindow(QWidget):
 
     def calibrate_blink_threshold(self):
         self.update_ear_threshold.emit(self.ear)
+     
+     
+    def calibrate_yawn_threshold(self):
+        self.update_ear_threshold.emit(self.ear)
+    
+         
+    def calibrate_talking_threshold(self):
+        self.update_ear_threshold.emit(self.ear)
+        
+        
+             
+    def calibrate_lookingdown_threshold(self):
+        self.update_ear_threshold.emit(self.ear)    
+    
 
         
 
