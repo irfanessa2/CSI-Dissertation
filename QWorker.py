@@ -35,14 +35,18 @@ class CameraStream(QObject):
     change_pixmap_signal = pyqtSignal(QImage)
     looking_direction = pyqtSignal(int)
 
-    def __init__(self, src=0):
+    def __init__(self, src=0) :
         super().__init__()
+        self.min_ear = 0
+        self.max_ear = 0
+        self.ear_threshold = 0
+
+
         self.src = src
         self.signals = CameraSignals()
         self.stopped = False
         self.hands = mp_hands.Hands()
         self.face_mesh = mp_face_mesh.FaceMesh()
-        self.ear_threshold = 1.0  # 0.21 before
         self.blinked = False
         self.opened = False
         self.face_feature_detection_thread = Thread()
@@ -54,9 +58,12 @@ class CameraStream(QObject):
         self.do_blink = False
         self.do_yawn = False
         self.printed_once = None
+
+
         
-        self.cap = cv2.VideoCapture(src)
         
+        self.cap = cv2.VideoCapture('yawn.mp4')
+
     @pyqtSlot(float)
     def set_ear_threashold(self, ear):
         self.ear_threshold = ear
@@ -170,16 +177,23 @@ class CameraStream(QObject):
                     self.signals.ear_signal.emit(ear)
 
                     feature_points = feature_points + right_eye + left_eye
+                    
 
-                    if ear < self.ear_threshold:
-                        if not self.blinked:
-                            self.blinked = True
-                            self.opened = False
-                            self.signals.eyes_closed_signal.emit()
-                    elif not self.opened:
-                        self.opened = True
-                        self.blinked = False
-                        self.signals.eyes_open_signal.emit()
+                    if self.do_blink:
+                        #if ear < self.ear_threshold:
+                        #print (self.ear_threshold)                    
+                            if ear < self.ear_threshold:
+                                if not self.blinked:
+                                    self.blinked = True
+                                    self.opened = False
+                                    self.signals.eyes_closed_signal.emit()
+                            elif not self.opened:
+                                self.opened = True
+                                self.blinked = False
+                                self.signals.eyes_open_signal.emit()
+
+
+
 
                 if self.do_yawn:
                     mouth = self.get_feature_landmarks(
@@ -236,6 +250,9 @@ class CameraStream(QObject):
                     (frame.copy(),),
                 )
                 self.draw_face_features(frame)
+
+
+                
             else:
                 self.face_results = None
 

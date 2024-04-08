@@ -1,14 +1,13 @@
 from collections import deque
 import time
-from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer, QThread
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer, QThread,QDateTime
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QStackedWidget,QLabel,QVBoxLayout,QWidget,QRadioButton,QHBoxLayout,QProgressBar, QPushButton
-from QWorker import CameraStream
 import pyqtgraph as pg
 from datetime import datetime
 import numpy as np
+import pandas as pd
 from QWorker import CameraStream
-
 
 class MediaPipeWindow(QWidget):
     update = pyqtSignal()
@@ -16,21 +15,28 @@ class MediaPipeWindow(QWidget):
     do_hands = pyqtSignal(bool)
     do_blink = pyqtSignal(bool)
     do_yawn = pyqtSignal(bool)
+
     
     update_ear_threshold = pyqtSignal(float)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent = None):
         super().__init__(parent)
         self.setWindowTitle("MediaPipe")
         self.resize(900, 480)
         self.blinks = 0
-        
+        self.yawn_mar_threshold = 1
+        self.talking_mar_threshold = 1
+
         self.eye_fatigue_threshold = None
         
         self.blink_threshold_line = None
         
         self.yawn_fatigue_threshold = None
         self.yawn_threshold_line = None
+
+
+
+
 
 
         self.start_time = datetime.now()  # Initialize the start time
@@ -64,6 +70,8 @@ class MediaPipeWindow(QWidget):
         # Initialize plot widget
         self.bpm_plot_widget = pg.PlotWidget(self)
         self.bpm_curve = self.bpm_plot_widget.plot(pen="y")
+                        
+        self.bpm_curve = self.bpm_plot_widget.plot(pen="y")
         self.ypm_plot_widget = pg.PlotWidget(self)
         self.ypm_curve = self.ypm_plot_widget.plot(pen="r")
 
@@ -72,9 +80,10 @@ class MediaPipeWindow(QWidget):
         self.blink_count_label = QLabel(self)
         self.yawn_count_label = QLabel(self)
         self.cameras = [
-            CameraStream(0),  # Replace with your actual CameraStream
+            CameraStream('yawn.mp4'),  # Replace with your actual CameraStream
             # CameraStream(2)
             ]
+        
         self.fps_label = QLabel("FPS: 0", self)
         self.bpm_label = QLabel("BPM: 0", self)  # Use for displaying text BPM
         self.ypm_label = QLabel("YPM: 0", self)  # Use for displaying text YPM
@@ -87,6 +96,8 @@ class MediaPipeWindow(QWidget):
         self.asleep_label.setStyleSheet("color:red")
         self.asleep_label.hide()
 
+
+        self.calibration_timer = QLabel("UNCALIBRATED", self)
         self.eye_fatigue_threshold_label = QLabel("Eye Fatigue Threshold: Calculating...", self)
         self.yawn_fatigue_threshold_label = QLabel("Yawn Threshold: Calculating...", self)
         
@@ -109,6 +120,8 @@ class MediaPipeWindow(QWidget):
 
         yawn_stats_layout.addWidget(self.mar)
         yawn_stats_layout.addWidget(self.yawn_type)
+        
+        
 
         frame_stats_layout.addWidget(self.fps_label)
         frame_stats_layout.addWidget(self.latency_label)
@@ -116,6 +129,8 @@ class MediaPipeWindow(QWidget):
         frame_stats_layout.addWidget(self.ypm_label)
         frame_stats_layout.addWidget(self.tilt_label)
         
+        
+        stats_layout.addWidget(self.calibration_timer)
         stats_layout.addWidget(self.eye_fatigue_threshold_label)
         stats_layout.addWidget(self.yawn_fatigue_threshold_label)
 
@@ -127,26 +142,36 @@ class MediaPipeWindow(QWidget):
 
 
 
-        self.calibrate_eye_threshold_button = QPushButton("Calibrate Eye Threshold (Click When Eyes Closed)", self)
-        self.calibrate_yawn_threshold_button = QPushButton("Calibrate Yawn Threshold (Click When Mouth fully open)", self)
-        self.calibrate_talking_threshold_button = QPushButton("Calibrate Talking Threshold (Click When mouth somewhat open)", self)
-        self.calibrate_lookingdown_threshold_button = QPushButton("Calibrate Looking Down Threshold (Click When looking down)", self)
+        self.export_data_button = QPushButton("Export Blink Data", self)
+        self.export_data_button.clicked.connect(self.export_blink_data)
+        stats_layout.addWidget(self.export_data_button)
+        self.blinks_time_data = []
+
+
+        # #self.calibrate_yawn_threshold_button = QPushButton("Calibrate Yawn Threshold (Click When Mouth fully open)", self)
+        # self.calibrate_talking_threshold_button = QPushButton("Calibrate Talking Threshold (Click When mouth somewhat open)", self)
+        # self.calibrate_lookingdown_threshold_button = QPushButton("Calibrate Looking Down Threshold (Click When looking down)", self)
+        
+        
+
+            
+        self.calibrate_ear_button = QPushButton("Calibrate!", self)
+        stats_layout.addWidget(self.calibrate_ear_button)  
+        self.calibrate_ear_button.clicked.connect(self.start_calibration_process)
 
 
 
-        
-        
-        stats_layout.addWidget(self.calibrate_eye_threshold_button)
-        self.calibrate_eye_threshold_button.clicked.connect(self.calibrate_blink_threshold)
 
-        stats_layout.addWidget(self.calibrate_yawn_threshold_button)
-        self.calibrate_yawn_threshold_button.clicked.connect(self.calibrate_yawn_threshold)
+
+
+        # stats_layout.addWidget(self.calibrate_yawn_threshold_button)
+        # self.calibrate_yawn_threshold_button.clicked.connect(self.calibrate_yawn_threshold)
         
-        stats_layout.addWidget(self.calibrate_talking_threshold_button)
-        self.calibrate_talking_threshold_button.clicked.connect(self.calibrate_talking_threshold)
+        #stats_layout.addWidget(self.calibrate_talking_threshold_button)
+#        self.calibrate_talking_threshold_button.clicked.connect(self.calibrate_talking_threshold)
         
-        stats_layout.addWidget(self.calibrate_lookingdown_threshold_button)
-        self.calibrate_lookingdown_threshold_button.clicked.connect(self.calibrate_lookingdown_threshold)
+        # stats_layout.addWidget(self.calibrate_lookingdown_threshold_button)
+        # self.calibrate_lookingdown_threshold_button.clicked.connect(self.calibrate_lookingdown_threshold)
 
 
         stats_layout.addWidget(QWidget())  # Placeholder widget
@@ -204,7 +229,7 @@ class MediaPipeWindow(QWidget):
         #self.stream.eyes_closed_signal.connect(self.update_blink_count)
         #self.stream.eyes_closed_signal.connect(self.start_closed_eyes_timer)
         #self.stream.eyes_open_signal.connect(self.start_open_eyes_timer)
-        #self.stream.mar_signal.connect(self.update_mar)
+        self.cameras[0].signals.mar_signal.connect(self.update_mar)
 
         #self.bot_cam.latency_signal.connect(self.latency_update)
         #self.bot_cam.change_pixmap_signal.connect(self.update_image)
@@ -219,6 +244,28 @@ class MediaPipeWindow(QWidget):
         self.connect_signals(self.cameras[0])
         self.threads = set() # prevent anonymous threads from being garbage collected (very oddgy if your resource managements its good; it's not :p)
         [self.start_camera_thread(cam) for cam in self.cameras]
+        
+
+
+
+    def collect_blink_data(self):
+            current_time = (datetime.now() - self.start_time).total_seconds() / 60  # Current time in minutes
+            self.blinks_time_data.append((current_time, self.blinks))
+        
+    # Method to export blink data to Excel
+    def export_blink_data(self):
+        # Convert the blink data to a DataFrame
+        df = pd.DataFrame(self.blinks_time_data, columns=['Time (Minutes)', 'Blinks'])
+        
+        # Create a Pandas Excel writer using openpyxl as the engine
+        with pd.ExcelWriter('blink_data.xlsx', engine='openpyxl') as writer:
+            # Convert the DataFrame to an Excel object
+            df.to_excel(writer, sheet_name='Sheet1', index=False)
+        
+        print("Blink data exported successfully.")
+
+
+        
         
         
     def start_camera_thread(self, cam):
@@ -269,13 +316,14 @@ class MediaPipeWindow(QWidget):
 
     @pyqtSlot(float)
     def update_mar(self, val):
+        self.current_mar = val
         self.mar.setText(f"Mouth AR: {val:.2f}")
-        if val > self.calibrate_yawn_threshold:
+        if val > self.talking_mar_threshold:
             yawn_type = "YAWNING"
             if not self.is_yawning:  # Check if transition to yawning state
                 self.is_yawning = True
                 self.update_yawn_count()
-        elif val < 0.6:
+        elif val < self.yawn_mar_threshold:
             yawn_type = "CLOSED"
             self.is_yawning = False  # Reset yawn state when mouth is closed
         else:
@@ -351,7 +399,10 @@ class MediaPipeWindow(QWidget):
 
     @pyqtSlot()
     def update_blink_count(self):
-        self.blinks += 1
+        self.blinks += 0.5
+        
+        if self.blinks % 1 == 0:  # Checks if `self.blinks` is a whole number
+            self.collect_blink_data()  # Now this gets called once per blink
         if self.eye_fatigue_threshold is None:  
             self.calculate_eye_fatigue_threshold()
         self.update.emit()
@@ -385,7 +436,7 @@ class MediaPipeWindow(QWidget):
     def calculate_eye_fatigue_threshold(self):
         if self.eye_fatigue_threshold is None:
             elapsed_time = datetime.now() - self.start_time
-            if elapsed_time.total_seconds() >= 10:  # Assuming 10 seconds for example
+            if elapsed_time.total_seconds() >= 20:  # Assuming 10 seconds for example
                 self.eye_fatigue_threshold = self.calculate_average_bpm() * 1.5
                 self.add_blink_threshold_line()
 
@@ -399,7 +450,7 @@ class MediaPipeWindow(QWidget):
                 pen=pg.mkPen('w', width=2)  # White line
             )
             self.bpm_plot_widget.addItem(self.blink_threshold_line)
-            print(self.eye_fatigue_threshold)
+            #print(self.eye_fatigue_threshold)
             self.eye_fatigue_threshold_label.setText(f"Eye Fatigue Threshold: {self.eye_fatigue_threshold:.2f} BPM")
 
 
@@ -463,7 +514,7 @@ class MediaPipeWindow(QWidget):
                 pen=pg.mkPen('w', width=2)  # White line
             )
             self.ypm_plot_widget.addItem(self.yawn_threshold_line)
-            print(self.yawn_fatigue_threshold)
+            #print(self.yawn_fatigue_threshold)
             self.yawn_fatigue_threshold_label.setText(f"Yawn Fatigue Threshold: {self.yawn_fatigue_threshold:.2f} YPM")      
                       
 
@@ -478,25 +529,120 @@ class MediaPipeWindow(QWidget):
                 self.yawn_fatigue_threshold_label.setStyleSheet("color: green")
 
 
-    def calibrate_blink_threshold(self):
-        self.update_ear_threshold.emit(self.ear)
-     
-     
-    def calibrate_yawn_threshold(self):
-        self.update_ear_threshold.emit(self.ear)
-    
-         
-    def calibrate_talking_threshold(self):
-        self.update_ear_threshold.emit(self.ear)
-        
-        
-             
-    def calibrate_lookingdown_threshold(self):
-        self.update_ear_threshold.emit(self.ear)    
+
     
 
         
+    def getmin_max_ear(self):
+        self.ear_values = []  
+        self.calibration_start_time = QDateTime.currentDateTime()  # Capture start time
 
+        def collect_ear():
+            self.ear_values.append(self.ear)
+            # Calculate elapsed time in seconds
+            elapsed_time = self.calibration_start_time.secsTo(QDateTime.currentDateTime())
+            remaining_time = max(0, 20 - elapsed_time)  # Ensure remaining time doesn't go below 0
+            if remaining_time > 0:
+                self.calibration_timer.setText(f"Calibrating... {remaining_time}s")
+                self.calibration_timer.setStyleSheet("color: red;")
+            else:
+                # Stop the timer and call finish_ear_collection if not already called
+                self.collect_ear_timer.stop()
+                self.finish_ear_collection()
+
+        # Initialize the QTimer instance for collecting EAR values at regular intervals
+        self.collect_ear_timer = QTimer(self)
+        self.collect_ear_timer.timeout.connect(collect_ear)
+        self.collect_ear_timer.start(100)  # Collecting EAR values every 100 ms.
+
+
+
+    def finish_ear_collection(self):
+        # Stop the timer and process collected EAR values.
+        self.collect_ear_timer.stop()
+        if self.ear_values:
+            CameraStream.min_ear = min(self.ear_values)
+            CameraStream.max_ear = max(self.ear_values)
+            CameraStream.ear_threshold = (CameraStream.min_ear + ((CameraStream.max_ear - CameraStream.min_ear)) * 0.3)
+
+            self.update_ear_threshold.emit(CameraStream.ear_threshold)
+            # Update the calibration timer label to show "Calibrated" in green
+            self.calibration_timer.setText("Calibrated!")
+            self.calibration_timer.setStyleSheet("color: green;")
+            
+            print(f"Min EAR: {CameraStream.min_ear}, Max EAR: {CameraStream.max_ear}")
+            print(f"EAR Threshold: {CameraStream.ear_threshold}")
+            print(f"EAR Threshold: {CameraStream.ear_threshold}")
+
+            
+        else:
+            # If no EAR values were collected, indicate calibration failed
+            self.calibration_timer.setText("Calibration Failed")
+            self.calibration_timer.setStyleSheet("color: red;")
+            print("No EAR values were collected.")
+
+       
+           
+           
+           
+           
+           
+           
+           
+           
+           
+           
+
+
+    def getmin_max_mar(self):
+        self.mar_values = []  
+        self.calibration_start_time = QDateTime.currentDateTime()  # Capture start time
+
+        def collect_mar():
+            self.mar_values.append(self.current_mar)            # Calculate elapsed time in seconds
+            elapsed_time = self.calibration_start_time.secsTo(QDateTime.currentDateTime())
+            remaining_time = max(0, 20 - elapsed_time)  # Ensure remaining time doesn't go below 0
+            if remaining_time > 0:
+                self.calibration_timer.setText(f"Calibrating... {remaining_time}s")
+                self.calibration_timer.setStyleSheet("color: red;")
+            else:
+                # Stop the timer and call finish_mar_collection if not already called
+                self.collect_mar_timer.stop()
+                self.finish_mar_collection()
+
+        # Initialize the QTimer instance for collecting EAR values at regular intervals
+        self.collect_mar_timer = QTimer(self)
+        self.collect_mar_timer.timeout.connect(collect_mar)
+        self.collect_mar_timer.start(100)  # Collecting EAR values every 100 ms.
+
+
+
+    def finish_mar_collection(self):
+        # Stop the timer and process collected MAR values.
+        self.collect_mar_timer.stop()
+        if self.mar_values:  # Make sure there are values collected
+            self.min_mar = min(self.mar_values)
+            self.max_mar = max(self.mar_values)
+            self.talking_mar_threshold = (self.min_mar + (self.max_mar - self.min_mar) * 0.1)
+            self.yawn_mar_threshold = (self.min_mar + (self.max_mar - self.min_mar) * 0.3)
+
+
+            # Here you might want to do something with self.mar_threshold,
+            # like emitting it with a signal or updating some UI element
+
+            print(f"Min MAR: {self.min_mar}, Max MAR: {self.max_mar}")
+            print(f"MAR Threshold: {self.talking_mar_threshold}")
+
+        else:
+            print("No MAR values were collected.")
+
+           
+           
+           
+           
+    def start_calibration_process(self):
+        self.getmin_max_ear()
+        self.getmin_max_mar()    
            
     @pyqtSlot(float)
     def update_ear(self, val):
