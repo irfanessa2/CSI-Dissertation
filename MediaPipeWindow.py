@@ -2,12 +2,14 @@ from collections import deque
 import time
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer, QThread,QDateTime
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import QStackedWidget,QLabel,QVBoxLayout,QWidget,QRadioButton,QHBoxLayout,QProgressBar, QPushButton
+from PyQt5.QtWidgets import QStackedWidget,QLabel,QVBoxLayout,QWidget,QRadioButton,QHBoxLayout,QProgressBar, QPushButton, QLineEdit, QComboBox, QMessageBox
 import pyqtgraph as pg
 from datetime import datetime
 import numpy as np
 import pandas as pd
 from QWorker import CameraStream
+import json
+import os
 
 class MediaPipeWindow(QWidget):
     update = pyqtSignal()
@@ -24,8 +26,7 @@ class MediaPipeWindow(QWidget):
         self.setWindowTitle("MediaPipe")
         self.resize(900, 480)
         self.blinks = 0
-        self.yawn_mar_threshold = 1
-        self.talking_mar_threshold = 1
+        self.yawn_mar_threshold = 10
 
         self.eye_fatigue_threshold = None
         
@@ -80,7 +81,7 @@ class MediaPipeWindow(QWidget):
         self.blink_count_label = QLabel(self)
         self.yawn_count_label = QLabel(self)
         self.cameras = [
-            CameraStream('yawn.mp4'),  # Replace with your actual CameraStream
+            CameraStream('regan.mp4'),  # Replace with your actual CameraStream
             # CameraStream(2)
             ]
         
@@ -141,6 +142,36 @@ class MediaPipeWindow(QWidget):
         stats_layout.addWidget(self.yawn_toggle)
 
 
+
+        profile_controls_layout = QHBoxLayout()
+
+
+    # Add the profile loader dropdown to the layout
+        self.profile_loader_dropdown = QComboBox(self)
+        profile_controls_layout.addWidget(self.profile_loader_dropdown)
+
+        # Add the "Load Selected Profile" button to the layout
+        self.load_profile_button = QPushButton("Load Profile", self)
+        self.load_profile_button.clicked.connect(self.load_profile)
+        profile_controls_layout.addWidget(self.load_profile_button)
+
+        # Add the "Delete Selected Profile" button to the layout
+        self.delete_profile_button = QPushButton("Delete Profile", self)
+        self.delete_profile_button.clicked.connect(self.delete_profile)
+        profile_controls_layout.addWidget(self.delete_profile_button)
+
+        # Assuming you have a layout called `stats_layout` where you want to insert these controls
+        # Insert the horizontal layout into the stats_layout or wherever appropriate
+        stats_layout.addLayout(profile_controls_layout)
+        self.refreshProfiles()
+
+        self.profile_name_input = QLineEdit(self)
+        self.profile_name_input.setPlaceholderText("Enter profile name")
+        self.save_profile_button = QPushButton("Save Profile", self)
+        self.save_profile_button.clicked.connect(self.save_profile)
+        stats_layout.addWidget(self.profile_name_input)
+        stats_layout.addWidget(self.save_profile_button)
+        
 
         self.export_data_button = QPushButton("Export Blink Data", self)
         self.export_data_button.clicked.connect(self.export_blink_data)
@@ -318,7 +349,7 @@ class MediaPipeWindow(QWidget):
     def update_mar(self, val):
         self.current_mar = val
         self.mar.setText(f"Mouth AR: {val:.2f}")
-        if val > self.talking_mar_threshold:
+        if val > self.yawn_mar_threshold:
             yawn_type = "YAWNING"
             if not self.is_yawning:  # Check if transition to yawning state
                 self.is_yawning = True
@@ -327,9 +358,13 @@ class MediaPipeWindow(QWidget):
             yawn_type = "CLOSED"
             self.is_yawning = False  # Reset yawn state when mouth is closed
         else:
-            yawn_type = "TALKING"
-            self.is_yawning = False  # Reset yawn state when talking
-        self.yawn_type.setText(yawn_type)
+            # Removed the  handling of "TALKING" state
+            # may choose to not set yawn_type here or handle it differently
+            self.is_yawning = False  # Ensure yawn state is reset for other conditions
+        if 'yawn_type' in locals():
+            self.yawn_type.setText(yawn_type)
+        # Only update yawn_type if it's defined (i.e., not talking
+
 
     def start_closed_eyes_timer(self):
         if self.opened_eyes_triggered:
@@ -623,7 +658,6 @@ class MediaPipeWindow(QWidget):
         if self.mar_values:  # Make sure there are values collected
             self.min_mar = min(self.mar_values)
             self.max_mar = max(self.mar_values)
-            self.talking_mar_threshold = (self.min_mar + (self.max_mar - self.min_mar) * 0.1)
             self.yawn_mar_threshold = (self.min_mar + (self.max_mar - self.min_mar) * 0.3)
 
 
@@ -631,7 +665,6 @@ class MediaPipeWindow(QWidget):
             # like emitting it with a signal or updating some UI element
 
             print(f"Min MAR: {self.min_mar}, Max MAR: {self.max_mar}")
-            print(f"MAR Threshold: {self.talking_mar_threshold}")
 
         else:
             print("No MAR values were collected.")
@@ -644,6 +677,84 @@ class MediaPipeWindow(QWidget):
         self.getmin_max_ear()
         self.getmin_max_mar()    
            
+           
+           
+           
+           
+
+    def save_profile(self):
+        profile_name = self.profile_name_input.text().strip()
+        if not profile_name:  # Check if the profile name is not empty
+            print("Please enter a profile name.")
+            return
+        
+        profile_dir = 'profiles'  # Directory name
+        if not os.path.exists(profile_dir):
+            os.makedirs(profile_dir)  # Create the directory if it doesn't exist
+        
+        profile_data = {
+            "name": profile_name,
+            "ear_threshold": CameraStream.ear_threshold,
+            "yawn_mar_threshold": self.yawn_mar_threshold,
+        }
+        
+        file_path = os.path.join(profile_dir, f"{profile_name}.json")  # Adjust file path
+        with open(file_path, "w") as file:
+            json.dump(profile_data, file, indent=4)
+        
+        print(f"Profile '{profile_name}' saved successfully.")
+        self.refreshProfiles()  # Refresh the profiles list if this function is defined
+
+     
+     
+     
+    def load_profile(self):
+        selected_profile = self.profile_loader_dropdown.currentText()
+        if not selected_profile:
+            print("No profile selected.")
+            return
+        
+        profile_path = os.path.join('profiles', selected_profile)  # Adjust if you use a different directory
+        try:
+            with open(profile_path, 'r') as file:
+                profile_data = json.load(file)
+                CameraStream.ear_threshold = profile_data.get('ear_threshold', 0.0)  # Provide default value
+                self.yawn_mar_threshold = profile_data.get('yawn_mar_threshold', 1.0)  # Provide default value
+                # Update any UI or variables that depend on these values
+                print(f"Loaded profile '{selected_profile}' successfully.")
+                self.calibration_timer.setText("Profile loaded. Calibrated!")
+                self.calibration_timer.setStyleSheet("color: green;")
+                self.update_ear_threshold.emit(CameraStream.ear_threshold)
+
+                # self.yawn_mar_threshold.emit(self.yawn_mar_threshold)
+
+        except Exception as e:
+            print(f"Failed to load profile '{selected_profile}': {e}")
+            
+            
+    def refreshProfiles(self):
+        self.profile_loader_dropdown.clear()
+        profile_dir = 'profiles'  # or '.' for the current directory
+        profile_files = [f for f in os.listdir(profile_dir) if f.endswith('.json')]
+        self.profile_loader_dropdown.addItems(profile_files)
+
+
+    def delete_profile(self):
+        selected_profile = self.profile_loader_dropdown.currentText()
+        if not selected_profile:
+            print("No profile selected for deletion.")
+            return
+
+        confirmation = QMessageBox.question(self, "Confirm Deletion", f"Are you sure you want to delete the profile '{selected_profile}'?", QMessageBox.Yes | QMessageBox.No)
+        if confirmation == QMessageBox.Yes:
+            profile_path = os.path.join('profiles', selected_profile)
+            try:
+                os.remove(profile_path)
+                print(f"Profile '{selected_profile}' deleted successfully.")
+                self.refreshProfiles()  # Refresh the profiles list
+            except Exception as e:
+                print(f"Failed to delete profile '{selected_profile}': {e}")
+        
     @pyqtSlot(float)
     def update_ear(self, val):
         self.ear = val

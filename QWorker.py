@@ -62,7 +62,7 @@ class CameraStream(QObject):
 
         
         
-        self.cap = cv2.VideoCapture('yawn.mp4')
+        self.cap = cv2.VideoCapture('regan.mp4')
 
     @pyqtSlot(float)
     def set_ear_threashold(self, ear):
