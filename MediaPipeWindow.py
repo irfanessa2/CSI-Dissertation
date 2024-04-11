@@ -11,10 +11,23 @@ from QWorker import CameraStream
 import json
 import os
 
+
+#export CAMERA_SOURCE=Lady.mp4
+CAMERA_SOURCE = os.getenv("CAMERA_SOURCE")
+assert(CAMERA_SOURCE)
+
+# opencv needs the index to the OS video object
+# try to convert to int
+try:
+    CAMERA_SOURCE = int(CAMERA_SOURCE)
+except ValueError:
+    # must have a path, so leave it
+    pass
+
+
 class MediaPipeWindow(QWidget):
     update = pyqtSignal()
     do_face = pyqtSignal(bool)
-    do_hands = pyqtSignal(bool)
     do_blink = pyqtSignal(bool)
     do_yawn = pyqtSignal(bool)
 
@@ -42,6 +55,7 @@ class MediaPipeWindow(QWidget):
 
         self.start_time = datetime.now()  # Initialize the start time
         self.ear = 0.0
+        self.current_mar = None
         self.yawns = 0
         self.frame_ts = 0
         self._last_frame_ts = 0
@@ -81,8 +95,8 @@ class MediaPipeWindow(QWidget):
         self.blink_count_label = QLabel(self)
         self.yawn_count_label = QLabel(self)
         self.cameras = [
-            CameraStream('regan.mp4'),  # Replace with your actual CameraStream
-            # CameraStream(2)
+            # Replace with your actual CameraStream
+            CameraStream(CAMERA_SOURCE)
             ]
         
         self.fps_label = QLabel("FPS: 0", self)
@@ -108,7 +122,6 @@ class MediaPipeWindow(QWidget):
         yawn_stats_layout = QHBoxLayout()
 
         self.face_toggle = QRadioButton("Face Detection", self, autoExclusive=False)
-        self.hands_toggle = QRadioButton("Hands Detection", self, autoExclusive=False)
         self.blink_toggle = QRadioButton("Blink Detection", self, autoExclusive=False)
         self.yawn_toggle = QRadioButton("Yawn Detection", self, autoExclusive=False)
 
@@ -137,7 +150,6 @@ class MediaPipeWindow(QWidget):
 
 
         stats_layout.addWidget(self.face_toggle)
-        stats_layout.addWidget(self.hands_toggle)
         stats_layout.addWidget(self.blink_toggle)
         stats_layout.addWidget(self.yawn_toggle)
 
@@ -165,12 +177,22 @@ class MediaPipeWindow(QWidget):
         stats_layout.addLayout(profile_controls_layout)
         self.refreshProfiles()
 
+        # Create a QHBoxLayout for the profile name input and the save button
+        profile_save_layout = QHBoxLayout()
+
+        # Create the profile name input QLineEdit
         self.profile_name_input = QLineEdit(self)
         self.profile_name_input.setPlaceholderText("Enter profile name")
+        profile_save_layout.addWidget(self.profile_name_input)  # Add the input to the horizontal layout
+
+        # Create the save profile button QPushButton
         self.save_profile_button = QPushButton("Save Profile", self)
         self.save_profile_button.clicked.connect(self.save_profile)
-        stats_layout.addWidget(self.profile_name_input)
-        stats_layout.addWidget(self.save_profile_button)
+        profile_save_layout.addWidget(self.save_profile_button)  # Add the button to the horizontal layout
+
+        # Add the QHBoxLayout (profile_save_layout) to the main QVBoxLayout (stats_layout)
+        stats_layout.addLayout(profile_save_layout)
+
         
 
         self.export_data_button = QPushButton("Export Blink Data", self)
@@ -179,10 +201,7 @@ class MediaPipeWindow(QWidget):
         self.blinks_time_data = []
 
 
-        # #self.calibrate_yawn_threshold_button = QPushButton("Calibrate Yawn Threshold (Click When Mouth fully open)", self)
-        # self.calibrate_talking_threshold_button = QPushButton("Calibrate Talking Threshold (Click When mouth somewhat open)", self)
-        # self.calibrate_lookingdown_threshold_button = QPushButton("Calibrate Looking Down Threshold (Click When looking down)", self)
-        
+      
         
 
             
@@ -195,14 +214,6 @@ class MediaPipeWindow(QWidget):
 
 
 
-        # stats_layout.addWidget(self.calibrate_yawn_threshold_button)
-        # self.calibrate_yawn_threshold_button.clicked.connect(self.calibrate_yawn_threshold)
-        
-        #stats_layout.addWidget(self.calibrate_talking_threshold_button)
-#        self.calibrate_talking_threshold_button.clicked.connect(self.calibrate_talking_threshold)
-        
-        # stats_layout.addWidget(self.calibrate_lookingdown_threshold_button)
-        # self.calibrate_lookingdown_threshold_button.clicked.connect(self.calibrate_lookingdown_threshold)
 
 
         stats_layout.addWidget(QWidget())  # Placeholder widget
@@ -227,9 +238,7 @@ class MediaPipeWindow(QWidget):
         self.face_toggle.toggled.connect(
             lambda: self.do_face.emit(self.face_toggle.isChecked())
         )
-        self.hands_toggle.toggled.connect(
-            lambda: self.do_hands.emit(self.hands_toggle.isChecked())
-        )
+
         self.blink_toggle.toggled.connect(
             lambda: self.do_blink.emit(self.blink_toggle.isChecked())
         )
@@ -239,17 +248,14 @@ class MediaPipeWindow(QWidget):
         )
 
         # [self.do_face.connect(cam.set_do_face) for cam in self.cameras]
-        # [self.do_hands.connect(cam.set_do_hands) for cam in self.cameras]
         # [self.do_blink.connect(cam.set_do_blink) for cam in self.cameras]
         # [self.do_yawn.connect(cam.set_do_yawn) for cam in self.cameras]
         
         #self.do_face.connect(self.stream.set_do_face)
-        #self.do_hands.connect(self.stream.set_do_hands)
         #self.do_blink.connect(self.stream.set_do_blink)
         #self.do_yawn.connect(self.stream.set_do_yawn)
         #
         #self.do_face.connect(self.bot_cam.set_do_face)
-        #self.do_hands.connect(self.bot_cam.set_do_hands)
         #self.do_blink.connect(self.bot_cam.set_do_blink)
         #self.do_yawn.connect(self.bot_cam.set_do_yawn)
         
@@ -321,7 +327,6 @@ class MediaPipeWindow(QWidget):
         cam_sig.eyes_open_signal.connect(self.start_open_eyes_timer)
 
         self.do_face.connect(camera.set_do_face)
-        self.do_hands.connect(camera.set_do_hands)
         self.do_blink.connect(camera.set_do_blink)
         self.do_yawn.connect(camera.set_do_yawn)
 
@@ -596,18 +601,18 @@ class MediaPipeWindow(QWidget):
         # Stop the timer and process collected EAR values.
         self.collect_ear_timer.stop()
         if self.ear_values:
-            CameraStream.min_ear = min(self.ear_values)
-            CameraStream.max_ear = max(self.ear_values)
-            CameraStream.ear_threshold = (CameraStream.min_ear + ((CameraStream.max_ear - CameraStream.min_ear)) * 0.3)
+            self.cameras[0].min_ear = min(self.ear_values)
+            self.cameras[0].max_ear = max(self.ear_values)
+            self.cameras[0].ear_threshold = (self.cameras[0].min_ear + ((self.cameras[0].max_ear - self.cameras[0].min_ear)) * 0.3)
 
-            self.update_ear_threshold.emit(CameraStream.ear_threshold)
+            self.update_ear_threshold.emit(self.cameras[0].ear_threshold)
             # Update the calibration timer label to show "Calibrated" in green
             self.calibration_timer.setText("Calibrated!")
             self.calibration_timer.setStyleSheet("color: green;")
             
-            print(f"Min EAR: {CameraStream.min_ear}, Max EAR: {CameraStream.max_ear}")
-            print(f"EAR Threshold: {CameraStream.ear_threshold}")
-            print(f"EAR Threshold: {CameraStream.ear_threshold}")
+            print(f"Min EAR: {self.cameras[0].min_ear}, Max EAR: {self.cameras[0].max_ear}")
+            print(f"EAR Threshold: {self.cameras[0].ear_threshold}")
+            print(f"EAR Threshold: {self.cameras[0].ear_threshold}")
 
             
         else:
@@ -637,10 +642,8 @@ class MediaPipeWindow(QWidget):
             self.mar_values.append(self.current_mar)            # Calculate elapsed time in seconds
             elapsed_time = self.calibration_start_time.secsTo(QDateTime.currentDateTime())
             remaining_time = max(0, 20 - elapsed_time)  # Ensure remaining time doesn't go below 0
-            if remaining_time > 0:
-                self.calibration_timer.setText(f"Calibrating... {remaining_time}s")
-                self.calibration_timer.setStyleSheet("color: red;")
-            else:
+            if remaining_time < 0:
+
                 # Stop the timer and call finish_mar_collection if not already called
                 self.collect_mar_timer.stop()
                 self.finish_mar_collection()
@@ -674,11 +677,9 @@ class MediaPipeWindow(QWidget):
            
            
     def start_calibration_process(self):
-        self.getmin_max_ear()
-        self.getmin_max_mar()    
-           
-           
-           
+        if self.current_mar is not None and self.ear != 0.0:
+            self.getmin_max_ear()
+            self.getmin_max_mar()
            
            
 
@@ -694,7 +695,7 @@ class MediaPipeWindow(QWidget):
         
         profile_data = {
             "name": profile_name,
-            "ear_threshold": CameraStream.ear_threshold,
+            "ear_threshold": self.cameras[0].ear_threshold,
             "yawn_mar_threshold": self.yawn_mar_threshold,
         }
         
@@ -718,13 +719,13 @@ class MediaPipeWindow(QWidget):
         try:
             with open(profile_path, 'r') as file:
                 profile_data = json.load(file)
-                CameraStream.ear_threshold = profile_data.get('ear_threshold', 0.0)  # Provide default value
+                self.cameras[0].ear_threshold = profile_data.get('ear_threshold', 0.0)  # Provide default value
                 self.yawn_mar_threshold = profile_data.get('yawn_mar_threshold', 1.0)  # Provide default value
                 # Update any UI or variables that depend on these values
                 print(f"Loaded profile '{selected_profile}' successfully.")
                 self.calibration_timer.setText("Profile loaded. Calibrated!")
                 self.calibration_timer.setStyleSheet("color: green;")
-                self.update_ear_threshold.emit(CameraStream.ear_threshold)
+                self.update_ear_threshold.emit(self.cameras[0].ear_threshold)
 
                 # self.yawn_mar_threshold.emit(self.yawn_mar_threshold)
 

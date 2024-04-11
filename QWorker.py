@@ -7,7 +7,6 @@ import numpy as np
 from threading import Thread
 
 mp_drawing = mp.solutions.drawing_utils
-mp_hands = mp.solutions.hands
 mp_face_mesh = mp.solutions.face_mesh
 
 LEFT_EYE_INDICES = [362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398,]
@@ -45,32 +44,22 @@ class CameraStream(QObject):
         self.src = src
         self.signals = CameraSignals()
         self.stopped = False
-        self.hands = mp_hands.Hands()
         self.face_mesh = mp_face_mesh.FaceMesh()
         self.blinked = False
         self.opened = False
         self.face_feature_detection_thread = Thread()
-        self.hand_detection_thread = Thread()
         self.face_results = None
-        self.hand_results = None
         self.do_face = False
-        self.do_hands = False
         self.do_blink = False
         self.do_yawn = False
         self.printed_once = None
-
-
-        
-        
-        self.cap = cv2.VideoCapture('regan.mp4')
+        self.cap = cv2.VideoCapture(src)
 
     @pyqtSlot(float)
     def set_ear_threashold(self, ear):
         self.ear_threshold = ear
 
-    @pyqtSlot(bool)
-    def set_do_hands(self, val):
-        self.do_hands = val
+
 
     @pyqtSlot(bool)
     def set_do_face(self, val):
@@ -84,9 +73,7 @@ class CameraStream(QObject):
     def set_do_blink(self, val):
         self.do_blink = val
 
-    def hand_detection_worker(self, frame):
-        frame_rgb = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2RGB)
-        self.hand_results = self.hands.process(frame_rgb)
+
 
 
 
@@ -133,14 +120,7 @@ class CameraStream(QObject):
         return looking_down
 
                         
-    def draw_hands(self, frame):
-        # Hand detection
-        if self.hand_results is not None and self.hand_results.multi_hand_landmarks:
-            for hand_landmarks in self.hand_results.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(
-                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS
-                )
-                
+
 
     def draw_face_features(self, frame):
         # face detection
@@ -233,16 +213,6 @@ class CameraStream(QObject):
         self.signals.latency_signal.emit(time.time_ns())
         ret, frame = self.cap.read()
         if ret:
-            if self.do_hands:
-                self.service_thread(
-                    "hand_detection_thread",
-                    self.hand_detection_worker,
-                    (frame.copy(),),
-                )
-                self.draw_hands(frame)
-            else:
-                self.hand_results = None
-
             if self.do_face or self.do_blink or self.do_yawn:
                 self.service_thread(
                     "face_feature_detection_thread",
@@ -264,7 +234,6 @@ class CameraStream(QObject):
         self.timer.stop()
         self.timer.deleteLater()
         self.cap.release()
-        self.hands.close()
         self.face_mesh.close()
 
 
