@@ -5,6 +5,8 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, Qt, QTimer
 from PyQt5.QtGui import QImage
 import numpy as np
 from threading import Thread
+from tensorflow.keras.models import load_model
+from facenet_pytorch import MTCNN
 
 mp_drawing = mp.solutions.drawing_utils
 mp_face_mesh = mp.solutions.face_mesh
@@ -39,8 +41,8 @@ class CameraStream(QObject):
         self.min_ear = 0
         self.max_ear = 0
         self.ear_threshold = 0
-
-
+        self.cap = cv2.VideoCapture(src)
+        self.mtcnn = MTCNN(keep_all=True)  # Initialize MTCNN face detector
         self.src = src
         self.signals = CameraSignals()
         self.stopped = False
@@ -53,13 +55,11 @@ class CameraStream(QObject):
         self.do_blink = False
         self.do_yawn = False
         self.printed_once = None
-        self.cap = cv2.VideoCapture(src)
+        self.model = load_model('model.h5')  # Load your TensorFlow model here
 
     @pyqtSlot(float)
     def set_ear_threashold(self, ear):
         self.ear_threshold = ear
-
-
 
     @pyqtSlot(bool)
     def set_do_face(self, val):
@@ -72,10 +72,6 @@ class CameraStream(QObject):
     @pyqtSlot(bool)
     def set_do_blink(self, val):
         self.do_blink = val
-
-
-
-
 
     def face_feature_detection_worker(self, frame):
         # Convert to RGB once
@@ -96,7 +92,6 @@ class CameraStream(QObject):
                         print("Looking down NOT detected")
                         self.looking_direction.emit(0)
                         self.printed_once = False
-
 
     @staticmethod
     def is_looking_down(face_landmarks):
@@ -119,9 +114,6 @@ class CameraStream(QObject):
 
         return looking_down
 
-                        
-
-
     def draw_face_features(self, frame):
         # face detection
         if self.face_results is not None and self.face_results.multi_face_landmarks:
@@ -141,7 +133,6 @@ class CameraStream(QObject):
                             -1,
                         )
 
-
                 feature_points = []
                 if self.do_blink:
                     left_eye = self.get_feature_landmarks(
@@ -157,23 +148,17 @@ class CameraStream(QObject):
                     self.signals.ear_signal.emit(ear)
 
                     feature_points = feature_points + right_eye + left_eye
-                    
 
                     if self.do_blink:
-                        #if ear < self.ear_threshold:
-                        #print (self.ear_threshold)                    
-                            if ear < self.ear_threshold:
-                                if not self.blinked:
-                                    self.blinked = True
-                                    self.opened = False
-                                    self.signals.eyes_closed_signal.emit()
-                            elif not self.opened:
-                                self.opened = True
-                                self.blinked = False
-                                self.signals.eyes_open_signal.emit()
-
-
-
+                        if ear < self.ear_threshold:
+                            if not self.blinked:
+                                self.blinked = True
+                                self.opened = False
+                                self.signals.eyes_closed_signal.emit()
+                        elif not self.opened:
+                            self.opened = True
+                            self.blinked = False
+                            self.signals.eyes_open_signal.emit()
 
                 if self.do_yawn:
                     mouth = self.get_feature_landmarks(
@@ -196,7 +181,7 @@ class CameraStream(QObject):
                         -1,
                     )
         return frame
-    
+
     def run(self):
         """ Make this thread async, fire of a read event every 1000//30 ms
             this gives the event loop time to process signals
@@ -206,31 +191,84 @@ class CameraStream(QObject):
         self.timer.setInterval(1000//30) # 30fps
         self.timer.timeout.connect(self._run)
         self.timer.start()
-        
-    
+
+
+
+
+
 
     def _run(self):
         self.signals.latency_signal.emit(time.time_ns())
         ret, frame = self.cap.read()
         if ret:
             if self.do_face or self.do_blink or self.do_yawn:
+                # Start the face feature detection thread
                 self.service_thread(
                     "face_feature_detection_thread",
                     self.face_feature_detection_worker,
                     (frame.copy(),),
                 )
-                self.draw_face_features(frame)
-
-
-                
             else:
+                # If no face feature detection is needed, set face_results to None
                 self.face_results = None
+            
+            # Draw face features directly on the frame
+            frame = self.draw_face_features(frame)
 
+            # If model loaded and predictions are needed
+            if self.model is not None and (self.do_face or self.do_blink or self.do_yawn):
+                # Predict eye state and annotate the frame with the prediction
+                if self.face_results is not None:
+                    boxes, _ = self.mtcnn.detect(frame)
+                    if boxes is not None:
+                        for box in boxes:
+                            x1, y1, x2, y2 = map(int, box)
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green rectangle for detected face
+
+                        # Use the first detected face for prediction
+                        box = boxes[0]
+                        x1, y1, x2, y2 = map(int, box)
+                        face_crop = frame[y1:y2, x1:x2]
+                        face_resized = cv2.resize(face_crop, (128, 128))
+                        predicted_frame = self.model.predict(np.expand_dims(face_resized, axis=0))
+                        predicted_class = np.argmax(predicted_frame, axis=1)
+                        confidence_score = np.max(predicted_frame)
+
+                        # Define class names based on your model's classes
+                        class_names = ['Alert', 'Medium fatigue', 'Asleep']
+                        class_name = class_names[predicted_class[0]]
+
+                        # Prepare text for display
+                        text = f"{class_name}, Confidence: {confidence_score:.2f}"
+
+                        # Display the prediction and confidence score
+                        cv2.putText(frame, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+                        # Depending on the predicted class, emit corresponding signals
+                        if predicted_class == 0:
+                            print("Prediction: Alert, Confidence Score:", confidence_score)
+                        elif predicted_class == 1:
+                            print("Prediction: Medium Fatigue, Confidence Score:", confidence_score)
+                        elif predicted_class == 2:
+                            print("Prediction: Asleep, Confidence Score:", confidence_score)
+
+                            # Emit signal for alert state
+                            pass
+                        # Add more conditions for other classes if needed
+
+            # Convert frame to QImage and emit signal to update GUI
             qimg = self.convert_to_qimage(frame)
             self.change_pixmap_signal.emit(qimg)
-    
+
+
+
     @pyqtSlot()
     def close(self):
+        # Emit signal to inform thread to stop
+        self.stop()
+        # Wait for the thread to finish
+        self.wait()
+        # Release resources
         self.timer.stop()
         self.timer.deleteLater()
         self.cap.release()
@@ -250,25 +288,24 @@ class CameraStream(QObject):
         self.stopped = True
         self.wait()
 
-        
     @staticmethod
     def calculate_ar(points):
         #[ [topx,topy], [bottomx,bottomy], [leftx,lefty], [rightx,righty] ] 
-        
+
         top, bottom, left, right = points
 
         dx = np.linalg.norm(top-bottom)
         dy = np.linalg.norm(left-right)      #d = difference, eucledian
-        
+
         if dy > 0:
             ar = dx/dy
             tilt = np.arctan((left[1]-right[1])/(left[0]-right[0]))
         else:
             ar = -1
             tilt = -1    
-        
+
         return (ar, tilt)
-        
+
     @staticmethod
     def get_feature_landmarks(landmarks, indices):
         return [np.array([landmarks[i].x, landmarks[i].y]) for i in indices]
@@ -280,5 +317,3 @@ class CameraStream(QObject):
         return QImage(frame.data, w, h, bytes_per_line, QImage.Format_BGR888).scaled(
             640, 480, Qt.KeepAspectRatio
         )
-
-
