@@ -12,7 +12,7 @@ import json
 import os
 
 
-#export CAMERA_SOURCE=Lady.mp4
+#export e.g CAMERA_SOURCE=regan.mp4
 CAMERA_SOURCE = os.getenv("CAMERA_SOURCE")
 assert(CAMERA_SOURCE)
 
@@ -33,6 +33,7 @@ class MediaPipeWindow(QWidget):
 
     
     update_ear_threshold = pyqtSignal(float)
+    update_mar_threshold = pyqtSignal(float)
 
     def __init__(self, parent = None):
         super().__init__(parent)
@@ -47,7 +48,7 @@ class MediaPipeWindow(QWidget):
         
         self.yawn_fatigue_threshold = None
         self.yawn_threshold_line = None
-
+        self.new_threshold = 10
 
 
 
@@ -69,11 +70,12 @@ class MediaPipeWindow(QWidget):
         self.eyes_opened_timer.setInterval(1)
 
         self.time_data = deque(
-            maxlen=300
+            maxlen=30000000000
         )  # Store up to the last 300 data points for time
         self.bpm_data = deque(
-            maxlen=300
+            maxlen=30000000000
         )  # Store up to the last 300 data points for BPM
+            #temporarly high for graphing
         
         self.time_data2 = deque(
             maxlen=300
@@ -200,20 +202,10 @@ class MediaPipeWindow(QWidget):
         stats_layout.addWidget(self.export_data_button)
         self.blinks_time_data = []
 
-
-      
-        
-
-            
+           
         self.calibrate_ear_button = QPushButton("Calibrate!", self)
         stats_layout.addWidget(self.calibrate_ear_button)  
         self.calibrate_ear_button.clicked.connect(self.start_calibration_process)
-
-
-
-
-
-
 
 
         stats_layout.addWidget(QWidget())  # Placeholder widget
@@ -303,8 +295,6 @@ class MediaPipeWindow(QWidget):
 
 
         
-        
-        
     def start_camera_thread(self, cam):
         thread = QThread()
         self.connect_signals(cam) # connect camera signals
@@ -314,6 +304,8 @@ class MediaPipeWindow(QWidget):
         thread.finished.connect(cam.deleteLater)
         thread.finished.connect(thread.deleteLater)
         self.update_ear_threshold.connect(cam.set_ear_threashold)
+        self.update_mar_threshold.connect(cam.set_mar_threashold)
+
         thread.start()
 
     def connect_signals(self, camera):
@@ -354,12 +346,12 @@ class MediaPipeWindow(QWidget):
     def update_mar(self, val):
         self.current_mar = val
         self.mar.setText(f"Mouth AR: {val:.2f}")
-        if val > self.yawn_mar_threshold:
+        if val > self.new_threshold:
             yawn_type = "YAWNING"
             if not self.is_yawning:  # Check if transition to yawning state
                 self.is_yawning = True
                 self.update_yawn_count()
-        elif val < self.yawn_mar_threshold:
+        elif val < self.new_threshold:
             yawn_type = "CLOSED"
             self.is_yawning = False  # Reset yawn state when mouth is closed
         else:
@@ -476,8 +468,8 @@ class MediaPipeWindow(QWidget):
     def calculate_eye_fatigue_threshold(self):
         if self.eye_fatigue_threshold is None:
             elapsed_time = datetime.now() - self.start_time
-            if elapsed_time.total_seconds() >= 20:  # Assuming 10 seconds for example
-                self.eye_fatigue_threshold = self.calculate_average_bpm() * 1.5
+            if elapsed_time.total_seconds() >= 240: # Assuming 10 seconds for example
+                self.eye_fatigue_threshold = self.calculate_average_bpm() * 1.3
                 self.add_blink_threshold_line()
 
 
@@ -533,6 +525,7 @@ class MediaPipeWindow(QWidget):
     def update_yawn_count(self):
         # print(self.camera_stream_instance.ear_threshold)
         self.yawns += 1
+        print (self.yawns)
         if self.yawn_fatigue_threshold is None:  
             self.calculate_yawn_fatigue_threshold()
         self.update.emit()
@@ -541,8 +534,8 @@ class MediaPipeWindow(QWidget):
     def calculate_yawn_fatigue_threshold(self):
         if self.yawn_fatigue_threshold is None:
             elapsed_time = datetime.now() - self.start_time
-            if elapsed_time.total_seconds() >= 10:  # Assuming 10 seconds for example
-                self.yawn_fatigue_threshold = self.calculate_average_ypm() * 1.5
+            if elapsed_time.total_seconds() >= 240:  # Assuming 10 seconds for example
+                self.yawn_fatigue_threshold = self.calculate_average_ypm() * 1.3
                 self.add_yawn_threshold_line()        
                 
     def add_yawn_threshold_line(self):
@@ -603,7 +596,7 @@ class MediaPipeWindow(QWidget):
         if self.ear_values:
             self.cameras[0].min_ear = min(self.ear_values)
             self.cameras[0].max_ear = max(self.ear_values)
-            self.cameras[0].ear_threshold = (self.cameras[0].min_ear + ((self.cameras[0].max_ear - self.cameras[0].min_ear)) * 0.3)
+            self.cameras[0].ear_threshold = (self.cameras[0].min_ear + ((self.cameras[0].max_ear - self.cameras[0].min_ear)/2) * 0.3)
 
             self.update_ear_threshold.emit(self.cameras[0].ear_threshold)
             # Update the calibration timer label to show "Calibrated" in green
@@ -622,59 +615,40 @@ class MediaPipeWindow(QWidget):
             print("No EAR values were collected.")
 
        
-           
-           
-           
-           
-           
-           
-           
-           
-           
-           
-
-
+ 
+        
     def getmin_max_mar(self):
-        self.mar_values = []  
-        self.calibration_start_time = QDateTime.currentDateTime()  # Capture start time
+        self.mar_values = []  # Reset the list to collect new values
+        self.calibration_start_time = QDateTime.currentDateTime()  # Reset start time
 
         def collect_mar():
-            self.mar_values.append(self.current_mar)            # Calculate elapsed time in seconds
+            self.mar_values.append(self.current_mar)
             elapsed_time = self.calibration_start_time.secsTo(QDateTime.currentDateTime())
-            remaining_time = max(0, 20 - elapsed_time)  # Ensure remaining time doesn't go below 0
-            if remaining_time < 0:
+            remaining_time = max(0, 20 - elapsed_time)
 
-                # Stop the timer and call finish_mar_collection if not already called
+            if elapsed_time >= 20:  # Stop after 20 seconds instead of checking remaining_time < 0
                 self.collect_mar_timer.stop()
                 self.finish_mar_collection()
 
-        # Initialize the QTimer instance for collecting EAR values at regular intervals
         self.collect_mar_timer = QTimer(self)
         self.collect_mar_timer.timeout.connect(collect_mar)
-        self.collect_mar_timer.start(100)  # Collecting EAR values every 100 ms.
-
+        self.collect_mar_timer.start(100)  # Collecting MAR values every 100 ms
+        
 
 
     def finish_mar_collection(self):
-        # Stop the timer and process collected MAR values.
         self.collect_mar_timer.stop()
-        if self.mar_values:  # Make sure there are values collected
-            self.min_mar = min(self.mar_values)
-            self.max_mar = max(self.mar_values)
-            self.yawn_mar_threshold = (self.min_mar + (self.max_mar - self.min_mar) * 0.3)
-
-
-            # Here you might want to do something with self.mar_threshold,
-            # like emitting it with a signal or updating some UI element
-
-            print(f"Min MAR: {self.min_mar}, Max MAR: {self.max_mar}")
-
+        if self.mar_values:
+            min_mar = min(self.mar_values)
+            max_mar = max(self.mar_values)
+            self.new_threshold = (min_mar + ((max_mar - min_mar)/2) * 0.99)
+   
+            self.update_mar_threshold.emit(self.new_threshold)
+            print(f"Min MAR: {min_mar}, Max MAR: {max_mar}, New Threshold: {self.new_threshold}")
         else:
             print("No MAR values were collected.")
-
-           
-           
-           
+    
+        
            
     def start_calibration_process(self):
         if self.current_mar is not None and self.ear != 0.0:
@@ -727,7 +701,7 @@ class MediaPipeWindow(QWidget):
                 self.calibration_timer.setStyleSheet("color: green;")
                 self.update_ear_threshold.emit(self.cameras[0].ear_threshold)
 
-                # self.yawn_mar_threshold.emit(self.yawn_mar_threshold)
+                self.yawn_mar_threshold.emit(self.yawn_mar_threshold)
 
         except Exception as e:
             print(f"Failed to load profile '{selected_profile}': {e}")
@@ -760,7 +734,6 @@ class MediaPipeWindow(QWidget):
     def update_ear(self, val):
         self.ear = val
         self.update.emit()
-
 
 
 
