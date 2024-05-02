@@ -40,9 +40,10 @@ class CameraStream(QObject):
         super().__init__()
         self.min_ear = 0
         self.max_ear = 0
+        self.min_mar = 0
+        self.max_mar = 0
         self.ear_threshold = 0
         self.cap = cv2.VideoCapture(src)
-        self.mtcnn = MTCNN(keep_all=True)  # Initialize MTCNN face detector
         self.src = src
         self.signals = CameraSignals()
         self.stopped = False
@@ -55,11 +56,14 @@ class CameraStream(QObject):
         self.do_blink = False
         self.do_yawn = False
         self.printed_once = None
-        self.model = load_model('model.h5')  # Load your TensorFlow model here
 
     @pyqtSlot(float)
     def set_ear_threashold(self, ear):
         self.ear_threshold = ear
+
+    @pyqtSlot(float)
+    def set_mar_threashold(self, mar):
+        self.yawn_mar_threshold = mar    
 
     @pyqtSlot(bool)
     def set_do_face(self, val):
@@ -104,7 +108,7 @@ class CameraStream(QObject):
         avg_eye_y = np.mean([ey[1] for ey in left_eye + right_eye])
 
         # Define a threshold for looking down, appropriate for normalized coordinates
-        LOOK_DOWN_THRESHOLD = 0.103 # Adjust based on testing  0.1
+        LOOK_DOWN_THRESHOLD = 0.103 # Adjust based on testing
 
         # Check if average eye Y position is less than the nose tip Y position by the threshold
         looking_down = avg_eye_y < nose_tip[1] - LOOK_DOWN_THRESHOLD
@@ -214,47 +218,6 @@ class CameraStream(QObject):
             
             # Draw face features directly on the frame
             frame = self.draw_face_features(frame)
-
-            # If model loaded and predictions are needed
-            if self.model is not None and (self.do_face or self.do_blink or self.do_yawn):
-                # Predict eye state and annotate the frame with the prediction
-                if self.face_results is not None:
-                    boxes, _ = self.mtcnn.detect(frame)
-                    if boxes is not None:
-                        for box in boxes:
-                            x1, y1, x2, y2 = map(int, box)
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green rectangle for detected face
-
-                        # Use the first detected face for prediction
-                        box = boxes[0]
-                        x1, y1, x2, y2 = map(int, box)
-                        face_crop = frame[y1:y2, x1:x2]
-                        face_resized = cv2.resize(face_crop, (128, 128))
-                        predicted_frame = self.model.predict(np.expand_dims(face_resized, axis=0))
-                        predicted_class = np.argmax(predicted_frame, axis=1)
-                        confidence_score = np.max(predicted_frame)
-
-                        # Define class names based on your model's classes
-                        class_names = ['Alert', 'Medium fatigue', 'Asleep']
-                        class_name = class_names[predicted_class[0]]
-
-                        # Prepare text for display
-                        text = f"{class_name}, Confidence: {confidence_score:.2f}"
-
-                        # Display the prediction and confidence score
-                        cv2.putText(frame, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-
-                        # Depending on the predicted class, emit corresponding signals
-                        if predicted_class == 0:
-                            print("Prediction: Alert, Confidence Score:", confidence_score)
-                        elif predicted_class == 1:
-                            print("Prediction: Medium Fatigue, Confidence Score:", confidence_score)
-                        elif predicted_class == 2:
-                            print("Prediction: Asleep, Confidence Score:", confidence_score)
-
-                            # Emit signal for alert state
-                            pass
-                        # Add more conditions for other classes if needed
 
             # Convert frame to QImage and emit signal to update GUI
             qimg = self.convert_to_qimage(frame)
